@@ -1,9 +1,16 @@
 {
   "name": "bglowacki-marketplace",
-  "description": "Personal Claude Code plugins by Bartosz Glowacki",
-  "plugins": {
-    "observability": {
-      "path": "./observability"
+  "owner": {
+    "name": "Bartosz Glowacki"
+  },
+  "metadata": {
+    "description": "Personal Claude Code plugins"
+  },
+  "plugins": [
+    {
+      "name": "observability",
+      "source": "./observability",
+      "description": "OTEL metrics, alerts, and session summaries for Claude Code"
     }
-  }
+  ]
 }
