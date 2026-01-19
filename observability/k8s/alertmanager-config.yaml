@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-local-webhook
+  namespace: observability
+data:
+  alertmanager.yaml: |
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: 'local-notifier'
+      group_by: ['alertname', 'project']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 1h
+      routes:
+        - match:
+            severity: warning
+          receiver: 'local-notifier'
+        - match:
+            severity: info
+          receiver: 'local-notifier'
+    receivers:
+      - name: 'local-notifier'
+        webhook_configs:
+          - url: 'http://host.docker.internal:9099'
+            send_resolved: false
