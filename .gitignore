@@ -1,0 +1,13 @@
+# Generated config
+observability/config/endpoint.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
