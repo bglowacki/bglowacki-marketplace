@@ -5,34 +5,56 @@
     "PostToolUse": [
       {
         "matcher": "*",
-        "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/send_event_otel.py --event-type PostToolUse",
-        "timeout": 5000
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/send_event_otel.py --event-type PostToolUse",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PreCompact": [
       {
         "matcher": "*",
-        "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/send_event_otel.py --event-type PreCompact",
-        "timeout": 5000
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/send_event_otel.py --event-type PreCompact",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "Stop": [
       {
-        "matcher": "*",
-        "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/send_event_otel.py --event-type Stop",
-        "timeout": 3000
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/send_event_otel.py --event-type Stop",
+            "timeout": 3
+          }
+        ]
       },
       {
-        "matcher": "*",
-        "command": "pkill -f alert-notifier.py 2>/dev/null || true",
-        "timeout": 5000
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pkill -f alert-notifier.py 2>/dev/null || true",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "SessionStart": [
       {
-        "matcher": "*",
-        "command": "${CLAUDE_PLUGIN_ROOT}/scripts/start-services.sh",
-        "timeout": 5000
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/start-services.sh",
+            "timeout": 5
+          }
+        ]
       }
     ]
   }
