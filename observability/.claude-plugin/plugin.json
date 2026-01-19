@@ -1,0 +1,39 @@
+{
+  "name": "observability",
+  "description": "Claude Code OTEL metrics, alerts, and session summaries. Tracks tool outcomes, workflow stages, and context efficiency.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/send_event_otel.py --event-type PostToolUse",
+        "timeout": 5000
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/send_event_otel.py --event-type PreCompact",
+        "timeout": 5000
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/send_event_otel.py --event-type Stop",
+        "timeout": 10000
+      },
+      {
+        "matcher": "*",
+        "command": "pkill -f alert-notifier.py 2>/dev/null || true",
+        "timeout": 5000
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "command": "${CLAUDE_PLUGIN_ROOT}/scripts/start-services.sh",
+        "timeout": 5000
+      }
+    ]
+  }
+}

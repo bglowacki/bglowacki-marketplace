@@ -1,0 +1,9 @@
+{
+  "name": "bglowacki-marketplace",
+  "description": "Personal Claude Code plugins by Bartosz Glowacki",
+  "plugins": {
+    "observability": {
+      "path": "./observability"
+    }
+  }
+}
