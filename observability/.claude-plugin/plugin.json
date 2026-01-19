@@ -1,6 +1,10 @@
 {
   "name": "observability",
+  "version": "1.0.0",
   "description": "Claude Code OTEL metrics, alerts, and session summaries. Tracks tool outcomes, workflow stages, and context efficiency.",
+  "skills": [
+    "./skills/setup-observability"
+  ],
   "hooks": {
     "PostToolUse": [
       {
@@ -28,6 +32,7 @@
     ],
     "Stop": [
       {
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
@@ -37,6 +42,7 @@
         ]
       },
       {
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
@@ -48,6 +54,7 @@
     ],
     "SessionStart": [
       {
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",

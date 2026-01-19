@@ -7,6 +7,6 @@ PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(dirname "$(dirname "$0")")}"
 pkill -f alert-notifier.py 2>/dev/null
 
 # Start alert-notifier in background
-nohup python3 "$PLUGIN_ROOT/scripts/alert-notifier.py" > /tmp/alert-notifier.log 2>&1 &
+nohup uv run "$PLUGIN_ROOT/scripts/alert-notifier.py" > /tmp/alert-notifier.log 2>&1 &
 
 exit 0
