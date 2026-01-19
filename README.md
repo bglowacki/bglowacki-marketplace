@@ -39,20 +39,13 @@ OTEL metrics, alerts, and session summaries for Claude Code.
 ```json
 {
   "env": {
-    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
-    "OTEL_METRICS_EXPORTER": "otlp",
-    "OTEL_LOGS_EXPORTER": "otlp",
-    "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
-    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector-external.observability.svc.cluster.local:4317",
     "OTEL_EXPORTER_OTLP_HTTP_ENDPOINT": "http://otel-collector-external.observability.svc.cluster.local:4318",
-    "OTEL_METRIC_EXPORT_INTERVAL": "30000",
-    "OTEL_METRICS_INCLUDE_SESSION_ID": "true",
     "OTEL_RESOURCE_ATTRIBUTES": "team.name=your-team,engineer.name=your-name"
   }
 }
 ```
 
-> **Note:** `CLAUDE_CODE_ENABLE_TELEMETRY` enables Claude Code's built-in telemetry via gRPC. Ensure your K8s OTEL collector is running before enabling, otherwise exit may hang while trying to flush metrics.
+> **Note:** The plugin uses HTTP (port 4318) for metrics. `CLAUDE_CODE_ENABLE_TELEMETRY` is **not required** - it enables Claude Code's separate built-in telemetry via gRPC which can cause exit hangs.
 
 2. **Deploy the K8s observability stack:**
 
@@ -91,8 +84,8 @@ The plugin is inactive until you run `/setup-observability`. This creates a conf
 #### Troubleshooting
 
 **Exit hangs:**
+- If `CLAUDE_CODE_ENABLE_TELEMETRY` is set to `"1"`, set it to `"0"` (not needed for this plugin)
 - Ensure OTEL collector is running: `kubectl get pods -n observability`
-- If K8s is down, temporarily set `CLAUDE_CODE_ENABLE_TELEMETRY` to `"0"`
 
 **No metrics:**
 - Verify `/setup-observability` was run
