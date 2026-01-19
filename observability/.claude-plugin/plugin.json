@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "description": "Claude Code OTEL metrics, alerts, and session summaries. Tracks tool outcomes, workflow stages, and context efficiency.",
   "skills": [
-    "./skills/setup-observability"
+    "./skills/setup-observability",
+    "./skills/usage-analyzer",
+    "./skills/workflow-optimizer"
   ],
   "hooks": {
     "PostToolUse": [
