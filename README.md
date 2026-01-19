@@ -6,7 +6,7 @@ Personal Claude Code plugins.
 
 ```bash
 # Add marketplace
-claude plugins add-marketplace github:bglowacki/bglowacki-marketplace
+claude plugins add-marketplace github:gs-bglowacki/bglowacki-marketplace
 
 # Install observability plugin
 claude plugins install observability@bglowacki-marketplace
