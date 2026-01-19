@@ -1,6 +1,6 @@
 ---
 name: setup-observability
-description: Deploy OTEL observability stack to Kubernetes. Triggers on "setup observability", "install observability", "configure metrics", "/setup-observability".
+description: Deploy OTEL observability stack to Kubernetes. Triggers on "setup observability", "install observability", "configure metrics", "/observability:setup-observability".
 ---
 
 # Setup Observability
@@ -16,7 +16,7 @@ Deploy the full observability stack for Claude Code metrics tracking.
 
 ## Usage
 
-Run this skill: `/setup-observability`
+Run this skill: `/observability:setup-observability`
 
 ## What This Deploys
 

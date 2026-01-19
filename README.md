@@ -57,7 +57,7 @@ OTEL metrics, alerts, and session summaries for Claude Code.
 2. **Deploy the K8s observability stack:**
 
 ```
-/setup-observability
+/observability:setup-observability
 ```
 
 This deploys:
