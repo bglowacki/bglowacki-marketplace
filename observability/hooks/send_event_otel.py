@@ -29,6 +29,21 @@ import tempfile
 from pathlib import Path
 from datetime import datetime
 
+# Early exit if setup hasn't been run yet
+# This prevents OTEL initialization from blocking when collector isn't available
+def _check_setup_complete() -> bool:
+    """Check if /setup-observability has been run."""
+    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    if not plugin_root:
+        return False
+    config_file = Path(plugin_root) / "config" / "endpoint.env"
+    return config_file.exists()
+
+if not _check_setup_complete():
+    # Plugin not configured yet - exit silently
+    # User needs to run /setup-observability first
+    sys.exit(0)
+
 STATE_DIR = Path(tempfile.gettempdir()) / "claude_code_metrics"
 SUMMARY_DIR = Path.home() / ".claude" / "session-summaries"
 
