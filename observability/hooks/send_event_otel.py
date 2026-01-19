@@ -135,11 +135,15 @@ tools_per_compaction = meter.create_histogram(
 def flush_metrics():
     global _connection_warned
     try:
-        provider.force_flush(timeout_millis=5000)
+        provider.force_flush(timeout_millis=2000)
     except Exception as e:
         if not _connection_warned:
             print(f"[observability] Warning: Could not send metrics - {e}", file=sys.stderr)
             _connection_warned = True
+    try:
+        provider.shutdown()
+    except Exception:
+        pass
 
 
 atexit.register(flush_metrics)
