@@ -1,5 +1,5 @@
 ---
-name: usage-analyzer
+name: observability-usage-analyzer
 description: Analyzes Claude Code session history to identify missed skill/agent opportunities. Triggers on "analyze usage", "missed skills", "usage patterns", or "review my sessions".
 ---
 

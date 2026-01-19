@@ -1,5 +1,5 @@
 ---
-name: workflow-optimizer
+name: observability-workflow-optimizer
 description: Analyzes usage-analyzer output and suggests minimal improvements to skills, agents, and workflows. Triggers on "optimize workflow", "improve triggers", "fix missed opportunities", or after running usage-analyzer.
 ---
 

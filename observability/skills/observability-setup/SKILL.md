@@ -1,5 +1,5 @@
 ---
-name: setup
+name: observability-setup
 description: Deploy OTEL observability stack to Kubernetes. Triggers on "setup observability", "install observability", "configure metrics".
 ---
 
