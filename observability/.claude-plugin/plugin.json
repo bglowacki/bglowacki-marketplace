@@ -1,6 +1,6 @@
 {
   "name": "observability",
-  "version": "1.9.2",
+  "version": "1.9.3",
   "description": "Claude Code OTEL metrics, alerts, and session summaries. Tracks tool outcomes, workflow stages, and context efficiency.",
   "hooks": {
     "PostToolUse": [
@@ -35,28 +35,6 @@
             "type": "command",
             "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/send_event_otel.py --event-type Stop",
             "timeout": 3
-          }
-        ]
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "pkill -f alert-notifier.py 2>/dev/null || true",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/start-services.sh",
-            "timeout": 5
           }
         ]
       }

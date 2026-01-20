@@ -130,11 +130,7 @@ echo "=== Step 8: Deploy Prometheus Alerts ==="
 kubectl apply -f "$SKILL_DIR/k8s/prometheus-alerts.yaml"
 
 echo ""
-echo "=== Step 9: Configure Alertmanager webhook ==="
-kubectl apply -f "$SKILL_DIR/k8s/alertmanager-config.yaml"
-
-echo ""
-echo "=== Step 10: Configure endpoints ==="
+echo "=== Step 9: Configure endpoints ==="
 # Write to global config (shared across all projects/versions)
 GLOBAL_CONFIG_DIR="$HOME/.claude/observability"
 mkdir -p "$GLOBAL_CONFIG_DIR"
@@ -146,7 +142,7 @@ echo "Config written to: $GLOBAL_CONFIG_DIR/endpoint.env"
 cat "$GLOBAL_CONFIG_DIR/endpoint.env"
 
 echo ""
-echo "=== Step 11: Verify deployment ==="
+echo "=== Step 10: Verify deployment ==="
 kubectl get pods -n observability
 echo ""
 kubectl get svc otel-collector-external prometheus-external -n observability
