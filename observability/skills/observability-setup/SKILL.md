@@ -7,6 +7,16 @@ description: Deploy OTEL observability stack to Kubernetes. Triggers on "setup o
 
 Deploy the full observability stack for Claude Code metrics tracking.
 
+**IMPORTANT:** This skill's k8s manifests are in the plugin directory, NOT in the current project.
+The `CLAUDE_PLUGIN_ROOT` environment variable points to the plugin location.
+Before running kubectl commands, first get the actual path:
+
+```bash
+echo $CLAUDE_PLUGIN_ROOT
+```
+
+Then use that path in the commands below (or the variable directly if your shell expands it).
+
 ## Prerequisites
 
 - OrbStack or minikube running with Kubernetes
@@ -27,6 +37,17 @@ Run this skill: `/setup`
 ## Setup Steps
 
 Execute these steps in order:
+
+### Step 0: Get Plugin Path
+
+First, determine where the plugin files are located:
+
+```bash
+echo "Plugin root: $CLAUDE_PLUGIN_ROOT"
+ls -la $CLAUDE_PLUGIN_ROOT/k8s/
+```
+
+This should show the k8s manifests (otel-collector.yaml, prometheus-alerts.yaml, alertmanager-config.yaml).
 
 ### Step 1: Check Prerequisites
 
