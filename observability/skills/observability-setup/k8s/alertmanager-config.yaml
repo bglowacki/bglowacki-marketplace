@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: local-webhook
+  namespace: observability
+  labels:
+    alertmanagerConfig: local-webhook
+spec:
+  route:
+    receiver: 'local-notifier'
+    groupBy: ['alertname', 'project']
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 1h
+  receivers:
+    - name: 'local-notifier'
+      webhookConfigs:
+        - url: 'http://host.docker.internal:9099'
+          sendResolved: false
