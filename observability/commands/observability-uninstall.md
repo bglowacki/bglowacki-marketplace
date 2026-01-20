@@ -14,15 +14,17 @@ Run the uninstall script to remove the observability stack:
 
 After the script completes, tell the user:
 
-**Uninstall complete!** The observability stack has been removed.
+**Uninstall complete!** Claude Code observability resources removed:
+- ✓ OTEL Collector (`claude-code-collector`)
+- ✓ External service (`otel-collector-external`)
+- ✓ Prometheus alert rules (`claude-code-alerts`)
+- ✓ Service monitor
+- ✓ Endpoint configuration
 
-What was removed:
-- OTEL Collector deployment and service
-- Prometheus alert rules
-- Endpoint configuration
+**Shared infrastructure NOT removed** (used by other services):
+- Prometheus/Grafana stack
+- Alertmanager
+- OpenTelemetry Operator
+- Base kube-prometheus rules
 
-What remains:
-- The `observability` namespace (may contain other resources)
-- Plugin hooks (will silently skip sending metrics when endpoint is unavailable)
-
-To fully clean up: `kubectl delete namespace observability`
+Plugin hooks will silently skip sending metrics when endpoint is unavailable.

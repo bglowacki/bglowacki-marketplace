@@ -19,20 +19,17 @@ echo "=== Step 3: Delete Prometheus Alerts ==="
 kubectl delete -f "$SKILL_DIR/k8s/prometheus-alerts.yaml" --ignore-not-found=true
 
 echo ""
-echo "=== Step 4: Delete namespace (optional) ==="
-echo "Keeping observability namespace (may contain other resources)"
-echo "To delete manually: kubectl delete namespace observability"
-
-echo ""
-echo "=== Step 5: Remove endpoint config ==="
+echo "=== Step 4: Remove endpoint config ==="
 rm -f "$SKILL_DIR/config/endpoint.env"
 echo "Removed endpoint configuration"
 
 echo ""
-echo "=== Step 6: Verify teardown ==="
-kubectl get pods -n observability -l app.kubernetes.io/name=claude-code-collector 2>/dev/null || echo "No collector pods found (good)"
+echo "=== Step 5: Verify teardown ==="
+echo "Checking for remaining Claude Code resources..."
+kubectl get opentelemetrycollector -n observability 2>/dev/null | grep -i claude || echo "✓ No Claude Code collectors"
+kubectl get svc -n observability 2>/dev/null | grep -i otel-collector-external || echo "✓ No OTEL external service"
+kubectl get prometheusrule -n observability 2>/dev/null | grep -i claude-code || echo "✓ No Claude Code alert rules"
+kubectl get servicemonitor -n observability 2>/dev/null | grep -i otel-collector || echo "✓ No OTEL service monitor"
 
 echo ""
 echo "=== Uninstall Complete ==="
-echo "The observability stack has been removed."
-echo "Plugin hooks will continue to run but will silently skip sending metrics."
