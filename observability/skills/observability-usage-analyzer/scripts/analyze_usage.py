@@ -30,10 +30,11 @@ import requests
 @dataclass
 class SkillOrAgent:
     name: str
-    type: str  # "skill" or "agent"
+    type: str  # "skill", "agent", or "command"
     description: str
     triggers: list[str]
     source_path: str
+    source_type: str = "unknown"  # "global", "project", or "plugin:<name>"
 
 
 @dataclass
@@ -241,10 +242,13 @@ def extract_triggers_from_description(description: str) -> list[str]:
 def discover_skills(paths: list[Path]) -> list[SkillOrAgent]:
     """Discover skills from given paths."""
     skills = []
+    home_str = str(Path.home())
 
     for base_path in paths:
         if not base_path.exists():
             continue
+
+        source_type = "global" if home_str in str(base_path) else "project"
 
         for skill_dir in base_path.iterdir():
             if not skill_dir.is_dir():
@@ -261,7 +265,7 @@ def discover_skills(paths: list[Path]) -> list[SkillOrAgent]:
                 name = frontmatter.get("name", skill_dir.name)
                 description = frontmatter.get("description", "")
                 triggers = extract_triggers_from_description(description)
-                triggers.append(name)
+                triggers.append(name.lower())
 
                 skills.append(SkillOrAgent(
                     name=name,
@@ -269,6 +273,7 @@ def discover_skills(paths: list[Path]) -> list[SkillOrAgent]:
                     description=description,
                     triggers=triggers,
                     source_path=str(skill_md),
+                    source_type=source_type,
                 ))
             except Exception as e:
                 print(f"Warning: Could not parse {skill_md}: {e}", file=sys.stderr)
@@ -279,10 +284,13 @@ def discover_skills(paths: list[Path]) -> list[SkillOrAgent]:
 def discover_agents(paths: list[Path]) -> list[SkillOrAgent]:
     """Discover agents from given paths."""
     agents = []
+    home_str = str(Path.home())
 
     for base_path in paths:
         if not base_path.exists():
             continue
+
+        source_type = "global" if home_str in str(base_path) else "project"
 
         for agent_file in base_path.glob("*.md"):
             try:
@@ -303,7 +311,7 @@ def discover_agents(paths: list[Path]) -> list[SkillOrAgent]:
                             break
 
                 triggers = extract_triggers_from_description(description)
-                triggers.append(name)
+                triggers.append(name.lower())
 
                 agents.append(SkillOrAgent(
                     name=name,
@@ -311,11 +319,165 @@ def discover_agents(paths: list[Path]) -> list[SkillOrAgent]:
                     description=description[:200],
                     triggers=triggers,
                     source_path=str(agent_file),
+                    source_type=source_type,
                 ))
             except Exception as e:
                 print(f"Warning: Could not parse {agent_file}: {e}", file=sys.stderr)
 
     return agents
+
+
+def discover_commands(paths: list[Path]) -> list[SkillOrAgent]:
+    """Discover commands from given paths."""
+    commands = []
+    home_str = str(Path.home())
+
+    for base_path in paths:
+        if not base_path.exists():
+            continue
+
+        source_type = "global" if home_str in str(base_path) else "project"
+
+        for cmd_file in base_path.glob("*.md"):
+            try:
+                content = cmd_file.read_text()
+                frontmatter = extract_yaml_frontmatter(content)
+                name = frontmatter.get("name", cmd_file.stem)
+                description = frontmatter.get("description", "")
+                triggers = extract_triggers_from_description(description)
+                triggers.append(name.lower())
+                triggers.append(f"/{name.lower()}")
+
+                commands.append(SkillOrAgent(
+                    name=name,
+                    type="command",
+                    description=description[:200],
+                    triggers=triggers,
+                    source_path=str(cmd_file),
+                    source_type=source_type,
+                ))
+            except Exception as e:
+                print(f"Warning: Could not parse {cmd_file}: {e}", file=sys.stderr)
+    return commands
+
+
+def discover_from_plugins(plugins_cache: Path) -> tuple[list[SkillOrAgent], list[SkillOrAgent], list[SkillOrAgent]]:
+    """Discover skills, agents, and commands from installed plugins."""
+    skills, agents, commands = [], [], []
+
+    if not plugins_cache.exists():
+        return skills, agents, commands
+
+    for marketplace_dir in plugins_cache.iterdir():
+        if not marketplace_dir.is_dir() or marketplace_dir.name.startswith("temp_"):
+            continue
+
+        for plugin_dir in marketplace_dir.iterdir():
+            if not plugin_dir.is_dir():
+                continue
+
+            version_dirs = [d for d in plugin_dir.iterdir() if d.is_dir() and not d.name.startswith(".")]
+            if not version_dirs:
+                continue
+
+            latest_version = max(version_dirs, key=lambda d: d.stat().st_mtime)
+            plugin_name = plugin_dir.name
+            source_type = f"plugin:{plugin_name}"
+
+            # Skills
+            skills_path = latest_version / "skills"
+            if skills_path.exists():
+                for skill_dir in skills_path.iterdir():
+                    if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists():
+                        skill_md = skill_dir / "SKILL.md"
+                        try:
+                            content = skill_md.read_text()
+                            frontmatter = extract_yaml_frontmatter(content)
+                            name = frontmatter.get("name", skill_dir.name)
+                            triggers = extract_triggers_from_description(frontmatter.get("description", ""))
+                            triggers.append(name.lower())
+                            skills.append(SkillOrAgent(
+                                name=name,
+                                type="skill",
+                                description=frontmatter.get("description", ""),
+                                triggers=triggers,
+                                source_path=str(skill_md),
+                                source_type=source_type,
+                            ))
+                        except Exception as e:
+                            print(f"Warning: Could not parse {skill_md}: {e}", file=sys.stderr)
+
+            # Agents
+            agents_path = latest_version / "agents"
+            if agents_path.exists():
+                for agent_file in agents_path.glob("*.md"):
+                    try:
+                        content = agent_file.read_text()
+                        frontmatter = extract_yaml_frontmatter(content)
+                        name = frontmatter.get("name", agent_file.stem)
+                        triggers = extract_triggers_from_description(frontmatter.get("description", ""))
+                        triggers.append(name.lower())
+                        agents.append(SkillOrAgent(
+                            name=name,
+                            type="agent",
+                            description=frontmatter.get("description", "")[:200],
+                            triggers=triggers,
+                            source_path=str(agent_file),
+                            source_type=source_type,
+                        ))
+                    except Exception as e:
+                        print(f"Warning: Could not parse {agent_file}: {e}", file=sys.stderr)
+
+            # Commands
+            commands_path = latest_version / "commands"
+            if commands_path.exists():
+                for cmd_file in commands_path.glob("*.md"):
+                    try:
+                        content = cmd_file.read_text()
+                        frontmatter = extract_yaml_frontmatter(content)
+                        name = frontmatter.get("name", cmd_file.stem)
+                        triggers = extract_triggers_from_description(frontmatter.get("description", ""))
+                        triggers.append(name.lower())
+                        triggers.append(f"/{name.lower()}")
+                        commands.append(SkillOrAgent(
+                            name=name,
+                            type="command",
+                            description=frontmatter.get("description", "")[:200],
+                            triggers=triggers,
+                            source_path=str(cmd_file),
+                            source_type=source_type,
+                        ))
+                    except Exception as e:
+                        print(f"Warning: Could not parse {cmd_file}: {e}", file=sys.stderr)
+
+    return skills, agents, commands
+
+
+def parse_claude_md_files(paths: list[Path]) -> dict:
+    """Parse CLAUDE.md files and return structured data."""
+    result = {
+        "files_found": [],
+        "files_missing": [],
+        "content": {},
+        "sections": [],
+    }
+
+    for path in paths:
+        if path.exists():
+            result["files_found"].append(str(path))
+            content = path.read_text()
+            result["content"][str(path)] = content
+
+            # Extract section headers
+            for line in content.split("\n"):
+                if line.startswith("## "):
+                    section = line[3:].strip()
+                    if section not in result["sections"]:
+                        result["sections"].append(section)
+        else:
+            result["files_missing"].append(str(path))
+
+    return result
 
 
 def _is_system_prompt(content: str) -> bool:
