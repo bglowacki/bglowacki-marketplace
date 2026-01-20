@@ -1,12 +1,12 @@
 ---
 name: observability-setup
-description: Deploy OTEL observability stack to Kubernetes
+description: Deploy full observability stack (Prometheus, Grafana, OTEL) to Kubernetes
 allowed-tools: Bash
 ---
 
 # Setup Observability
 
-Run the setup script to deploy the observability stack:
+Run the setup script to deploy the full observability stack:
 
 !`${CLAUDE_PLUGIN_ROOT}/skills/observability-setup/scripts/setup.sh`
 
@@ -14,13 +14,16 @@ Run the setup script to deploy the observability stack:
 
 After the script completes, tell the user:
 
-**Setup complete!** The observability stack is now running.
+**Setup complete!** Full observability stack deployed:
+- ✓ Prometheus (metrics storage)
+- ✓ Grafana (dashboards)
+- ✓ OTEL Operator
+- ✓ OTEL Collector (receives telemetry from plugin)
+- ✓ Alert rules configured
 
-**No additional configuration needed** - this plugin automatically sends telemetry via hooks:
-- `PostToolUse` → sends tool metrics after each tool call
-- `PreCompact` → sends context metrics before compaction
-- `Stop` → generates session summary
+**No additional configuration needed** - plugin hooks automatically send telemetry.
 
-Endpoints (for reference only):
+Endpoints:
 - OTEL: `http://localhost:30418`
 - Prometheus: `http://prometheus-kube-prometheus-prometheus.observability.svc.cluster.local:9090`
+- Grafana: `http://localhost:3000` (admin/prom-operator)

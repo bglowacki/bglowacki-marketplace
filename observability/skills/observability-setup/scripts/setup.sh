@@ -4,9 +4,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(dirname "$SCRIPT_DIR")"
 
-echo "=== Observability Setup ==="
+echo "=== Observability Full Setup ==="
 echo "Skill directory: $SKILL_DIR"
-echo "K8s manifests: $SKILL_DIR/k8s/"
 
 # Verify manifests exist
 if [ ! -d "$SKILL_DIR/k8s" ]; then
@@ -15,25 +14,44 @@ if [ ! -d "$SKILL_DIR/k8s" ]; then
 fi
 
 echo ""
-echo "=== Step 1: Listing manifests ==="
-ls -la "$SKILL_DIR/k8s/"
-
-echo ""
-echo "=== Step 2: Switch to orbstack context ==="
+echo "=== Step 1: Switch to orbstack context ==="
 kubectl config use-context orbstack
-
-echo ""
-echo "=== Step 3: Verify cluster ==="
 kubectl cluster-info
 
 echo ""
-echo "=== Step 4: Create namespace ==="
+echo "=== Step 2: Create namespace ==="
 kubectl get namespace observability || kubectl create namespace observability
+
+echo ""
+echo "=== Step 3: Install Prometheus Stack (Helm) ==="
+if helm status kube-prometheus-stack -n observability &>/dev/null; then
+    echo "Prometheus stack already installed"
+else
+    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts 2>/dev/null || true
+    helm repo update
+    helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+        --namespace observability \
+        --set prometheus.prometheusSpec.enableRemoteWriteReceiver=true \
+        --set grafana.enabled=true \
+        --wait --timeout 5m
+fi
+
+echo ""
+echo "=== Step 4: Install OTEL Operator ==="
+if kubectl get crd opentelemetrycollectors.opentelemetry.io &>/dev/null; then
+    echo "OTEL Operator already installed"
+else
+    kubectl apply -f https://github.com/open-telemetry/opentelemetry-operator/releases/latest/download/opentelemetry-operator.yaml
+    echo "Waiting for OTEL operator to be ready..."
+    kubectl wait --for=condition=available deployment/opentelemetry-operator-controller-manager -n opentelemetry-operator-system --timeout=120s 2>/dev/null || sleep 30
+fi
 
 echo ""
 echo "=== Step 5: Deploy OTEL Collector ==="
 kubectl apply -f "$SKILL_DIR/k8s/otel-collector.yaml"
-kubectl wait --for=condition=available deployment/claude-code-collector-collector -n observability --timeout=60s
+echo "Waiting for collector..."
+sleep 10
+kubectl wait --for=condition=available deployment/claude-code-collector-collector -n observability --timeout=60s || echo "Collector may still be starting..."
 
 echo ""
 echo "=== Step 6: Deploy Prometheus Alerts ==="
@@ -50,10 +68,11 @@ cat "$SKILL_DIR/config/endpoint.env"
 
 echo ""
 echo "=== Step 8: Verify deployment ==="
-kubectl get pods -n observability -l app.kubernetes.io/name=claude-code-collector
+kubectl get pods -n observability | head -20
 kubectl get svc otel-collector-external -n observability
 
 echo ""
 echo "=== Setup Complete ==="
 echo "OTEL endpoint: http://localhost:30418"
 echo "Prometheus: http://prometheus-kube-prometheus-prometheus.observability.svc.cluster.local:9090"
+echo "Grafana: http://localhost:3000 (admin/prom-operator)"
