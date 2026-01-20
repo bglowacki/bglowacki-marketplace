@@ -42,8 +42,7 @@ echo "Cleaned up any leftovers from previous versions"
 
 echo ""
 echo "=== Step 8: Remove endpoint config ==="
-PLUGIN_CONFIG_DIR="${CLAUDE_PLUGIN_ROOT:-$SKILL_DIR/../..}/config"
-rm -f "$PLUGIN_CONFIG_DIR/endpoint.env"
+rm -f "$HOME/.claude/observability/endpoint.env"
 echo "Removed endpoint configuration"
 
 echo ""

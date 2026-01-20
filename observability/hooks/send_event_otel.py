@@ -29,19 +29,11 @@ import tempfile
 from pathlib import Path
 from datetime import datetime
 
-# Early exit if setup hasn't been run yet
-# This prevents OTEL initialization from blocking when collector isn't available
-def _check_setup_complete() -> bool:
-    """Check if /setup-observability has been run."""
-    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
-    if not plugin_root:
-        return False
-    config_file = Path(plugin_root) / "config" / "endpoint.env"
-    return config_file.exists()
+# Global config location
+GLOBAL_CONFIG = Path.home() / ".claude" / "observability" / "endpoint.env"
 
-if not _check_setup_complete():
-    # Plugin not configured yet - exit silently
-    # User needs to run /setup-observability first
+if not GLOBAL_CONFIG.exists():
+    # Not configured - run /observability-setup first
     sys.exit(0)
 
 STATE_DIR = Path(tempfile.gettempdir()) / "claude_code_metrics"
@@ -51,19 +43,11 @@ _connection_warned = False
 
 
 def get_otel_endpoint() -> str:
-    """Get OTEL endpoint from plugin config, env var, or default."""
-    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
-    if plugin_root:
-        config_file = Path(plugin_root) / "config" / "endpoint.env"
-        if config_file.exists():
-            for line in config_file.read_text().splitlines():
-                if line.startswith("OTEL_ENDPOINT="):
-                    return line.split("=", 1)[1].strip()
-
-    return os.environ.get(
-        "OTEL_EXPORTER_OTLP_HTTP_ENDPOINT",
-        "http://otel-collector-external.observability.svc.cluster.local:4318"
-    )
+    """Get OTEL endpoint from global config."""
+    for line in GLOBAL_CONFIG.read_text().splitlines():
+        if line.startswith("OTEL_ENDPOINT="):
+            return line.split("=", 1)[1].strip()
+    return "http://localhost:30418"
 
 
 OTEL_ENDPOINT = get_otel_endpoint()

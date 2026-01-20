@@ -71,16 +71,13 @@ class PrometheusData:
 # =============================================================================
 
 def get_prometheus_endpoint() -> Optional[str]:
-    """Get Prometheus endpoint from plugin config or env."""
-    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
-    if plugin_root:
-        config_file = Path(plugin_root) / "config" / "endpoint.env"
-        if config_file.exists():
-            for line in config_file.read_text().splitlines():
-                if line.startswith("PROMETHEUS_ENDPOINT="):
-                    return line.split("=", 1)[1].strip()
-
-    return os.environ.get("PROMETHEUS_ENDPOINT")
+    """Get Prometheus endpoint from global config."""
+    global_config = Path.home() / ".claude" / "observability" / "endpoint.env"
+    if global_config.exists():
+        for line in global_config.read_text().splitlines():
+            if line.startswith("PROMETHEUS_ENDPOINT="):
+                return line.split("=", 1)[1].strip()
+    return None
 
 
 def query_prometheus(endpoint: str, query: str, timeout: int = 5) -> Optional[dict]:
