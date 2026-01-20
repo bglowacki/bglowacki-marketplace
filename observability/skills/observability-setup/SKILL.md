@@ -5,68 +5,65 @@ description: Deploy OTEL observability stack to Kubernetes. Triggers on "setup o
 
 # Setup Observability
 
-## CRITICAL: READ THIS FIRST
+Deploy the Claude Code observability stack to Kubernetes.
 
-**The k8s manifests are in the PLUGIN directory, NOT the user's project.**
+## How to Use This Skill
 
-- Plugin location: `~/.claude/plugins/` (specifically `$CLAUDE_PLUGIN_ROOT/k8s/`)
-- Do NOT search the current working directory
-- Do NOT use Glob, Grep, or Search tools
-- The files you need are NOT in the user's project
+When this skill is loaded, you receive a **"Base directory for this skill:"** header above. Use that path to access the k8s manifests.
 
-**Your FIRST action must be:** `echo $CLAUDE_PLUGIN_ROOT && ls $CLAUDE_PLUGIN_ROOT/k8s/`
+**Example:** If the header shows `Base directory for this skill: /path/to/skill`, then:
+- Manifests are at `/path/to/skill/k8s/`
+- Config will be at `/path/to/skill/config/`
 
-## Step 1: Verify plugin path
+## Steps
 
-Run this Bash command IMMEDIATELY (do not search first):
+### 1. Verify the manifests exist
 
+Substitute the base directory path into this command:
+```bash
+ls {base_directory}/k8s/
 ```
-echo "Plugin root: $CLAUDE_PLUGIN_ROOT" && ls $CLAUDE_PLUGIN_ROOT/k8s/
-```
 
-This will show you the manifests: `otel-collector.yaml` and `prometheus-alerts.yaml`
+### 2. Setup Kubernetes context
 
-## Step 2: Setup Kubernetes
-
-```
+```bash
 kubectl config use-context orbstack
 kubectl cluster-info
 kubectl get namespace observability || kubectl create namespace observability
 ```
 
-## Step 3: Deploy OTEL Collector
+### 3. Deploy OTEL Collector
 
-```
-kubectl apply -f $CLAUDE_PLUGIN_ROOT/k8s/otel-collector.yaml
+```bash
+kubectl apply -f {base_directory}/k8s/otel-collector.yaml
 kubectl wait --for=condition=available deployment/claude-code-collector-collector -n observability --timeout=60s
 ```
 
-## Step 4: Deploy Prometheus Alerts
+### 4. Deploy Prometheus Alerts
 
-```
-kubectl apply -f $CLAUDE_PLUGIN_ROOT/k8s/prometheus-alerts.yaml
+```bash
+kubectl apply -f {base_directory}/k8s/prometheus-alerts.yaml
 ```
 
-## Step 5: Configure endpoints
+### 5. Configure endpoints
 
-```
-mkdir -p $CLAUDE_PLUGIN_ROOT/config
-cat > $CLAUDE_PLUGIN_ROOT/config/endpoint.env << 'EOF'
+```bash
+mkdir -p {base_directory}/config
+cat > {base_directory}/config/endpoint.env << 'EOF'
 OTEL_ENDPOINT=http://localhost:30418
 PROMETHEUS_ENDPOINT=http://prometheus-kube-prometheus-prometheus.observability.svc.cluster.local:9090
 EOF
-cat $CLAUDE_PLUGIN_ROOT/config/endpoint.env
 ```
 
-## Step 6: Verify
+### 6. Verify deployment
 
-```
+```bash
 kubectl get pods -n observability -l app.kubernetes.io/name=claude-code-collector
 kubectl get svc otel-collector-external -n observability
 ```
 
-## Done
+## After Setup
 
-Report to user:
-- OTEL endpoint: `http://localhost:30418`
+Tell the user:
+- OTEL: `http://localhost:30418`
 - Prometheus: `http://prometheus-kube-prometheus-prometheus.observability.svc.cluster.local:9090`
