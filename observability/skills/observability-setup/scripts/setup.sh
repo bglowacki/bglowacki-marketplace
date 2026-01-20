@@ -40,15 +40,15 @@ if helm status otel-collector -n observability &>/dev/null; then
 else
     helm install otel-collector open-telemetry/opentelemetry-collector \
         --namespace observability \
+        --set image.repository=otel/opentelemetry-collector-contrib \
         --set mode=deployment \
         --set replicaCount=1 \
-        --set presets.kubernetesAttributes.enabled=true \
         --set config.receivers.otlp.protocols.grpc.endpoint="0.0.0.0:4317" \
         --set config.receivers.otlp.protocols.http.endpoint="0.0.0.0:4318" \
+        --set config.exporters.debug.verbosity=basic \
         --set config.exporters.prometheus.endpoint="0.0.0.0:8889" \
-        --set config.exporters.prometheusremotewrite.endpoint="http://kube-prometheus-stack-prometheus:9090/api/v1/write" \
         --set config.service.pipelines.metrics.receivers="{otlp}" \
-        --set config.service.pipelines.metrics.exporters="{prometheus,prometheusremotewrite}" \
+        --set config.service.pipelines.metrics.exporters="{prometheus,debug}" \
         --set ports.otlp.enabled=true \
         --set ports.otlp-http.enabled=true \
         --wait --timeout 2m
