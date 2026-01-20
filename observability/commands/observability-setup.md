@@ -25,5 +25,5 @@ After the script completes, tell the user:
 
 Endpoints:
 - OTEL: `http://localhost:30418`
-- Prometheus: `http://prometheus-kube-prometheus-prometheus.observability.svc.cluster.local:9090`
+- Prometheus: `http://localhost:30090`
 - Grafana: `http://localhost:3000` (admin/prom-operator)
