@@ -1,30 +1,24 @@
 ---
 name: observability-usage-analyzer
 description: Analyzes Claude Code session history and Prometheus metrics to identify missed skill/agent opportunities. Triggers on "analyze usage", "missed skills", "usage patterns", or "review my sessions".
+allowed-tools: Bash
 ---
 
 # Usage Analyzer
 
-Analyze Claude Code usage patterns by combining Prometheus metrics with JSONL session data.
+**IMPORTANT: Just run the script. Do NOT manually query Prometheus or use kubectl.**
 
-## When to Use
+```bash
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-analyzer/scripts/analyze_usage.py
+```
 
-- After work sessions to review efficiency
-- To audit skill/agent adoption patterns
-- To identify workflow automation gaps
-- To track usage trends over time
+The script handles Prometheus connectivity automatically (falls back to JSONL-only if unavailable).
 
-## Data Sources
+---
 
-| Source | Provides | When Available |
-|--------|----------|----------------|
-| **Prometheus** | Aggregates, trends, success rates, workflow stages | If configured during `/observability:setup` |
-| **JSONL** | Full session context, exact prompts, specific examples | Always (local files) |
+## Examples
 
-## Quick Start
-
-Run the analysis:
-
+**Default analysis:**
 ```bash
 uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-analyzer/scripts/analyze_usage.py
 ```
@@ -34,7 +28,7 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-analyzer/scripts/analyze
 uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-analyzer/scripts/analyze_usage.py --format dashboard
 ```
 
-**Quick stats from session summaries:**
+**Quick stats:**
 ```bash
 uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-analyzer/scripts/analyze_usage.py --quick-stats
 ```
