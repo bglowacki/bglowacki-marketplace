@@ -30,6 +30,8 @@ else
         --namespace observability \
         --set prometheus.prometheusSpec.enableRemoteWriteReceiver=true \
         --set grafana.enabled=true \
+        --set alertmanager.alertmanagerSpec.alertmanagerConfigSelector.matchLabels.alertmanagerConfig=local-webhook \
+        --set alertmanager.alertmanagerSpec.alertmanagerConfigNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=observability \
         --wait --timeout 5m
 fi
 
@@ -87,7 +89,11 @@ echo "=== Step 7: Deploy Prometheus Alerts ==="
 kubectl apply -f "$SKILL_DIR/k8s/prometheus-alerts.yaml" 2>/dev/null || echo "Alert rules skipped (may already exist)"
 
 echo ""
-echo "=== Step 8: Configure endpoints ==="
+echo "=== Step 8: Configure Alertmanager webhook ==="
+kubectl apply -f "$SKILL_DIR/k8s/alertmanager-config.yaml"
+
+echo ""
+echo "=== Step 9: Configure endpoints ==="
 mkdir -p "$SKILL_DIR/config"
 cat > "$SKILL_DIR/config/endpoint.env" << 'EOF'
 OTEL_ENDPOINT=http://localhost:30418
@@ -96,7 +102,7 @@ EOF
 cat "$SKILL_DIR/config/endpoint.env"
 
 echo ""
-echo "=== Step 9: Verify deployment ==="
+echo "=== Step 10: Verify deployment ==="
 kubectl get pods -n observability
 echo ""
 kubectl get svc otel-collector-external -n observability
