@@ -42,7 +42,8 @@ echo "Cleaned up any leftovers from previous versions"
 
 echo ""
 echo "=== Step 8: Remove endpoint config ==="
-rm -f "$SKILL_DIR/config/endpoint.env"
+PLUGIN_CONFIG_DIR="${CLAUDE_PLUGIN_ROOT:-$SKILL_DIR/../..}/config"
+rm -f "$PLUGIN_CONFIG_DIR/endpoint.env"
 echo "Removed endpoint configuration"
 
 echo ""

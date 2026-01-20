@@ -94,12 +94,14 @@ kubectl apply -f "$SKILL_DIR/k8s/alertmanager-config.yaml"
 
 echo ""
 echo "=== Step 9: Configure endpoints ==="
-mkdir -p "$SKILL_DIR/config"
-cat > "$SKILL_DIR/config/endpoint.env" << 'EOF'
+# Write to plugin root config (where hooks read from)
+PLUGIN_CONFIG_DIR="${CLAUDE_PLUGIN_ROOT:-$SKILL_DIR/../..}/config"
+mkdir -p "$PLUGIN_CONFIG_DIR"
+cat > "$PLUGIN_CONFIG_DIR/endpoint.env" << 'EOF'
 OTEL_ENDPOINT=http://localhost:30418
 PROMETHEUS_ENDPOINT=http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090
 EOF
-cat "$SKILL_DIR/config/endpoint.env"
+cat "$PLUGIN_CONFIG_DIR/endpoint.env"
 
 echo ""
 echo "=== Step 10: Verify deployment ==="
