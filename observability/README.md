@@ -12,26 +12,42 @@ Claude Code plugin for OTEL-based metrics, alerts, and session summaries.
 
 ## Prerequisites
 
-- Kubernetes cluster with:
-  - OpenTelemetry Operator
-  - Prometheus Operator
+- Kubernetes cluster (OrbStack recommended)
+- `kubectl` configured
+- `helm` installed
 - `uv` package manager
-- `kubectl` configured for your cluster
 
 ## Quick Start
 
 Run the setup skill:
 
 ```
-/observability:setup-observability
+/observability-setup
 ```
 
-See [skills/setup-observability/SKILL.md](skills/setup-observability/SKILL.md) for detailed setup instructions.
+See [skills/observability-setup/SKILL.md](skills/observability-setup/SKILL.md) for detailed setup instructions.
 
-## Environment Variables
+## Available Skills
 
-- `CLAUDE_CODE_ENABLE_TELEMETRY=1` - Required for metrics collection
-- `OTEL_EXPORTER_OTLP_ENDPOINT` - Set automatically during setup
+| Skill | Description |
+|-------|-------------|
+| `/observability-setup` | Deploy full observability stack to Kubernetes |
+| `/observability-uninstall` | Remove entire stack (OTEL, Prometheus, Grafana, cert-manager) |
+| `/observability-usage-analyzer` | Analyze session patterns, identify missed opportunities |
+| `/observability-workflow-optimizer` | Suggest improvements based on usage analysis |
+
+## Configuration
+
+All configuration is handled automatically by `/observability-setup`. No manual environment variables needed.
+
+> **Note:** `CLAUDE_CODE_ENABLE_TELEMETRY` is **not required** and can cause exit hangs. This plugin uses its own metrics pipeline.
+
+## Utility Scripts
+
+| Script | Description |
+|--------|-------------|
+| `scripts/check-health.sh` | Verify all components are running |
+| `scripts/teardown.sh` | Stop local services |
 
 ## Architecture
 

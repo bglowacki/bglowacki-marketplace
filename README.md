@@ -27,38 +27,28 @@ OTEL metrics, alerts, and session summaries for Claude Code.
 
 #### Prerequisites
 
-- OrbStack or minikube with Kubernetes
-- kubectl configured
-- OTEL Operator installed
-- Prometheus Operator installed (for alerts)
+- Kubernetes cluster (OrbStack recommended)
+- `kubectl` configured
+- `helm` installed
+- `uv` package manager
 
 #### Setup
 
-1. **Add OTEL settings to `~/.claude/settings.json`:**
-
-```json
-{
-  "env": {
-    "OTEL_EXPORTER_OTLP_HTTP_ENDPOINT": "http://otel-collector-external.observability.svc.cluster.local:4318",
-    "OTEL_RESOURCE_ATTRIBUTES": "team.name=your-team,engineer.name=your-name"
-  }
-}
-```
-
-> **Note:** The plugin uses HTTP (port 4318) for metrics. `CLAUDE_CODE_ENABLE_TELEMETRY` is **not required** - it enables Claude Code's separate built-in telemetry via gRPC which can cause exit hangs.
-
-2. **Deploy the K8s observability stack:**
+1. **Deploy the observability stack:**
 
 ```
-/observability:setup-observability
+/observability-setup
 ```
 
-This deploys:
+This deploys and configures everything:
 - OTEL Collector (receives metrics)
 - Prometheus alerts (4 workflow alerts)
 - Alertmanager config (routes to local webhook)
+- Endpoint configuration (no manual env vars needed)
 
-3. **Restart Claude Code** to load the plugin hooks.
+2. **Restart Claude Code** to load the plugin hooks.
+
+> **Note:** `CLAUDE_CODE_ENABLE_TELEMETRY` is **not required** and can cause exit hangs. This plugin uses its own metrics pipeline.
 
 #### How It Works
 
@@ -94,3 +84,39 @@ The plugin is inactive until you run `/setup-observability`. This creates a conf
 **No alerts:**
 - Check alert-notifier is running: `pgrep -f alert-notifier`
 - Check logs: `cat /tmp/alert-notifier.log`
+
+#### Health Check
+
+Run the health check to verify all components:
+
+```bash
+./observability/scripts/check-health.sh
+```
+
+#### Additional Skills
+
+**Usage Analyzer** - Analyze session patterns and identify missed skill/agent opportunities:
+
+```
+/observability-usage-analyzer
+```
+
+Options: `--sessions N`, `--format table|dashboard|json`, `--quick-stats`
+
+**Workflow Optimizer** - Suggests improvements to skills and workflows based on usage analysis:
+
+```
+/observability-workflow-optimizer
+```
+
+Run after usage-analyzer to get actionable improvement recommendations.
+
+#### Uninstall
+
+Remove the entire observability stack:
+
+```
+/observability-uninstall
+```
+
+This removes OTEL Collector, Prometheus, Grafana, cert-manager, and all related namespaces.
