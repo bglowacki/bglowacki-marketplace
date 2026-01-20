@@ -64,6 +64,8 @@ kind: Service
 metadata:
   name: otel-collector-external
   namespace: observability
+  labels:
+    app: otel-collector-external
 spec:
   type: NodePort
   selector:
@@ -113,7 +115,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/name: opentelemetry-collector
+      app: otel-collector-external
   namespaceSelector:
     matchNames:
       - observability
