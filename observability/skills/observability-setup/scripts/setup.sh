@@ -101,15 +101,38 @@ spec:
 EOF
 
 echo ""
-echo "=== Step 7: Deploy Prometheus Alerts ==="
+echo "=== Step 7: Create ServiceMonitor for OTEL collector ==="
+kubectl apply -f - <<EOF
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: otel-collector-metrics
+  namespace: observability
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opentelemetry-collector
+  namespaceSelector:
+    matchNames:
+      - observability
+  endpoints:
+    - port: prometheus
+      interval: 15s
+      path: /metrics
+EOF
+
+echo ""
+echo "=== Step 8: Deploy Prometheus Alerts ==="
 kubectl apply -f "$SKILL_DIR/k8s/prometheus-alerts.yaml"
 
 echo ""
-echo "=== Step 8: Configure Alertmanager webhook ==="
+echo "=== Step 9: Configure Alertmanager webhook ==="
 kubectl apply -f "$SKILL_DIR/k8s/alertmanager-config.yaml"
 
 echo ""
-echo "=== Step 9: Configure endpoints ==="
+echo "=== Step 10: Configure endpoints ==="
 # Write to global config (shared across all projects/versions)
 GLOBAL_CONFIG_DIR="$HOME/.claude/observability"
 mkdir -p "$GLOBAL_CONFIG_DIR"
@@ -121,7 +144,7 @@ echo "Config written to: $GLOBAL_CONFIG_DIR/endpoint.env"
 cat "$GLOBAL_CONFIG_DIR/endpoint.env"
 
 echo ""
-echo "=== Step 10: Verify deployment ==="
+echo "=== Step 11: Verify deployment ==="
 kubectl get pods -n observability
 echo ""
 kubectl get svc otel-collector-external prometheus-external -n observability
