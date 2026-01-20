@@ -480,6 +480,104 @@ def parse_claude_md_files(paths: list[Path]) -> dict:
     return result
 
 
+def generate_analysis_json(
+    skills: list[SkillOrAgent],
+    agents: list[SkillOrAgent],
+    commands: list[SkillOrAgent],
+    sessions: list[SessionData],
+    jsonl_stats: dict,
+    claude_md: dict,
+    prom_data: PrometheusData,
+) -> dict:
+    """Generate rich JSON output for agent interpretation."""
+
+    return {
+        "_schema": {
+            "description": "Claude Code usage analysis data for agent interpretation",
+            "version": "2.0",
+            "sections": {
+                "discovery": "All available skills, agents, and commands discovered from global, project, and plugin sources",
+                "sessions": "Parsed session data showing what was actually used",
+                "stats": "Aggregated statistics on usage and missed opportunities",
+                "claude_md": "Content and structure of CLAUDE.md configuration files",
+                "prometheus": "Metrics from Prometheus if available (trends, success rates)",
+            },
+        },
+
+        "discovery": {
+            "skills": [
+                {
+                    "name": s.name,
+                    "description": s.description,
+                    "triggers": s.triggers,
+                    "source": s.source_type,
+                }
+                for s in skills
+            ],
+            "agents": [
+                {
+                    "name": a.name,
+                    "description": a.description,
+                    "triggers": a.triggers,
+                    "source": a.source_type,
+                }
+                for a in agents
+            ],
+            "commands": [
+                {
+                    "name": c.name,
+                    "description": c.description,
+                    "triggers": c.triggers,
+                    "source": c.source_type,
+                }
+                for c in commands
+            ],
+            "totals": {
+                "skills": len(skills),
+                "agents": len(agents),
+                "commands": len(commands),
+            },
+        },
+
+        "sessions": {
+            "count": len(sessions),
+            "prompts": [
+                {
+                    "session_id": s.session_id,
+                    "text": p[:500],
+                }
+                for s in sessions
+                for p in s.prompts[:5]
+            ][:50],
+        },
+
+        "stats": {
+            "total_sessions": jsonl_stats["total_sessions"],
+            "total_prompts": jsonl_stats["total_prompts"],
+            "skills_used": dict(jsonl_stats["skills_used"]),
+            "agents_used": dict(jsonl_stats["agents_used"]),
+            "commands_used": dict(jsonl_stats.get("commands_used", {})),
+            "potential_matches": {
+                "skills": dict(jsonl_stats["missed_skills"]),
+                "agents": dict(jsonl_stats["missed_agents"]),
+                "commands": dict(jsonl_stats.get("missed_commands", {})),
+            },
+        },
+
+        "claude_md": claude_md,
+
+        "prometheus": {
+            "available": prom_data.available,
+            "skill_usage": prom_data.skill_usage,
+            "agent_usage": prom_data.agent_usage,
+            "skill_trends": prom_data.skill_trends,
+            "agent_trends": prom_data.agent_trends,
+            "workflow_stages": prom_data.workflow_stages,
+            "success_rate": prom_data.overall_success_rate,
+        } if prom_data.available else {"available": False},
+    }
+
+
 def _is_system_prompt(content: str) -> bool:
     """Filter out system-generated prompts."""
     if content.startswith("Base directory for this skill:"):
@@ -589,6 +687,7 @@ def find_matches(prompt: str, items: list[SkillOrAgent], min_triggers: int = 2) 
 def analyze_jsonl(
     skills: list[SkillOrAgent],
     agents: list[SkillOrAgent],
+    commands: list[SkillOrAgent],
     sessions: list[SessionData],
 ) -> tuple[list[MissedOpportunity], dict]:
     """Analyze sessions for missed opportunities."""
@@ -598,11 +697,13 @@ def analyze_jsonl(
         "total_prompts": sum(len(s.prompts) for s in sessions),
         "skills_used": defaultdict(int),
         "agents_used": defaultdict(int),
+        "commands_used": defaultdict(int),
         "missed_skills": defaultdict(int),
         "missed_agents": defaultdict(int),
+        "missed_commands": defaultdict(int),
     }
 
-    all_items = skills + agents
+    all_items = skills + agents + commands
 
     for session in sessions:
         for skill in session.skills_used:
@@ -619,6 +720,9 @@ def analyze_jsonl(
                     was_used = True
                 elif item.type == "agent" and item.name in session.agents_used:
                     was_used = True
+                elif item.type == "command":
+                    # Commands are slash commands - check if /command was in the prompt
+                    was_used = f"/{item.name}" in prompt.lower()
 
                 if not was_used:
                     missed.append(MissedOpportunity(
@@ -630,8 +734,10 @@ def analyze_jsonl(
 
                     if item.type == "skill":
                         stats["missed_skills"][item.name] += 1
-                    else:
+                    elif item.type == "agent":
                         stats["missed_agents"][item.name] += 1
+                    else:
+                        stats["missed_commands"][item.name] += 1
 
     return missed, stats
 
@@ -1120,14 +1226,32 @@ def main():
         else:
             print("No Prometheus endpoint configured, using JSONL only", file=sys.stderr)
 
-    # Discover skills and agents
+    # Discover skills, agents, and commands
     skill_paths = [home / ".claude" / "skills", cwd / ".claude" / "skills"]
     agent_paths = [home / ".claude" / "agents", cwd / ".claude" / "agents"]
+    command_paths = [home / ".claude" / "commands", cwd / ".claude" / "commands"]
+    plugins_cache = home / ".claude" / "plugins" / "cache"
 
-    print("Discovering skills and agents...", file=sys.stderr)
+    print("Discovering skills, agents, and commands...", file=sys.stderr)
     skills = discover_skills(skill_paths)
     agents = discover_agents(agent_paths)
-    print(f"Found {len(skills)} skills, {len(agents)} agents", file=sys.stderr)
+    commands = discover_commands(command_paths)
+
+    # Discover from plugins
+    plugin_skills, plugin_agents, plugin_commands = discover_from_plugins(plugins_cache)
+    skills.extend(plugin_skills)
+    agents.extend(plugin_agents)
+    commands.extend(plugin_commands)
+
+    print(f"Found {len(skills)} skills, {len(agents)} agents, {len(commands)} commands", file=sys.stderr)
+
+    # Parse CLAUDE.md files
+    claude_md_paths = [
+        home / ".claude" / "CLAUDE.md",
+        cwd / "CLAUDE.md",
+        cwd / ".claude" / "instructions.md",
+    ]
+    claude_md = parse_claude_md_files(claude_md_paths)
 
     # Find and parse sessions
     projects_dir = home / ".claude" / "projects"
@@ -1137,14 +1261,17 @@ def main():
     sessions = [parse_session_file(f) for f in session_files]
 
     # Analyze JSONL
-    missed, jsonl_stats = analyze_jsonl(skills, agents, sessions)
+    missed, jsonl_stats = analyze_jsonl(skills, agents, commands, sessions)
 
     # Correlate data
     insights = correlate_data(prom_data, jsonl_stats, missed)
 
     # Output
     if args.format == "json":
-        print_json(prom_data, jsonl_stats, insights, missed)
+        output = generate_analysis_json(
+            skills, agents, commands, sessions, jsonl_stats, claude_md, prom_data
+        )
+        print(json.dumps(output, indent=2))
     elif args.format == "dashboard":
         print_dashboard(prom_data, jsonl_stats, insights)
     else:
