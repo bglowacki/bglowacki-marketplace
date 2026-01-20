@@ -86,7 +86,7 @@ EOF
 
 echo ""
 echo "=== Step 7: Deploy Prometheus Alerts ==="
-kubectl apply -f "$SKILL_DIR/k8s/prometheus-alerts.yaml" 2>/dev/null || echo "Alert rules skipped (may already exist)"
+kubectl apply -f "$SKILL_DIR/k8s/prometheus-alerts.yaml"
 
 echo ""
 echo "=== Step 8: Configure Alertmanager webhook ==="
