@@ -1,54 +1,128 @@
 ---
 name: observability-usage-analyzer
-description: Analyzes Claude Code session history to identify missed skill/agent opportunities. Triggers on "analyze usage", "missed skills", "usage patterns", or "review my sessions".
+description: Analyzes Claude Code session history and Prometheus metrics to identify missed skill/agent opportunities. Triggers on "analyze usage", "missed skills", "usage patterns", or "review my sessions".
 ---
 
 # Usage Analyzer
 
-Analyze Claude Code session history to identify missed skill/agent opportunities.
+Analyze Claude Code usage patterns by combining Prometheus metrics with JSONL session data.
 
 ## When to Use
 
 - After work sessions to review efficiency
 - To audit skill/agent adoption patterns
 - To identify workflow automation gaps
+- To track usage trends over time
+
+## Data Sources
+
+| Source | Provides | When Available |
+|--------|----------|----------------|
+| **Prometheus** | Aggregates, trends, success rates, workflow stages | If configured during `/observability:setup` |
+| **JSONL** | Full session context, exact prompts, specific examples | Always (local files) |
 
 ## Quick Start
 
 Run the analysis:
 
 ```bash
-uv run ${CLAUDE_PLUGIN_ROOT}/skills/usage-analyzer/scripts/analyze_usage.py
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-analyzer/scripts/analyze_usage.py
+```
+
+**Dashboard view:**
+```bash
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-analyzer/scripts/analyze_usage.py --format dashboard
 ```
 
 **Quick stats from session summaries:**
 ```bash
-uv run ${CLAUDE_PLUGIN_ROOT}/skills/usage-analyzer/scripts/analyze_usage.py --quick-stats
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-analyzer/scripts/analyze_usage.py --quick-stats
 ```
 
-Options:
-- `--sessions N` - Analyze last N sessions (default: 10)
-- `--format json|table` - Output format (default: table)
-- `--verbose` - Show detailed match reasoning
-- `--quick-stats` - Show aggregate stats from session summaries (fast)
-- `--days N` - Days to include in quick stats (default: 14)
+## Options
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--sessions N` | Number of sessions to analyze | 10 |
+| `--format table\|dashboard\|json` | Output format | table |
+| `--verbose` | Show detailed examples | false |
+| `--quick-stats` | Fast mode from session summaries | false |
+| `--days N` | Days to include in quick stats | 14 |
+| `--no-prometheus` | Skip Prometheus even if available | false |
+| `--prometheus-endpoint URL` | Override Prometheus endpoint | from config |
+| `--range 7d\|14d\|30d` | Time range for Prometheus queries | 7d |
+
+## Output Formats
+
+### Table (default)
+
+Shows detailed analysis with:
+- Prometheus trends (skills/agents usage with ↑↓↔ indicators)
+- Workflow stages coverage
+- JSONL usage stats
+- Correlated insights (combining both data sources)
+- Missed opportunities with examples
+- Recommendations
+
+### Dashboard
+
+Compact ASCII dashboard with:
+- Progress bars for skill usage
+- Success rate visualization
+- Workflow stage flow diagram
+- Top insights summary
+
+### JSON
+
+Machine-readable output for programmatic use.
 
 ## How It Works
 
-1. **Discover Available Skills/Agents** - Dynamically scans `~/.claude/skills/`, `~/.claude/agents/`, `.claude/skills/`, and `.claude/agents/`
-2. **Extract Trigger Patterns** - Parses skill descriptions and agent definitions for trigger keywords
-3. **Parse Session History** - Reads `~/.claude/history.jsonl` for user prompts
-4. **Pattern Match** - Compares prompts against discovered triggers
-5. **Identify Misses** - Finds prompts matching patterns where skill/agent wasn't invoked
-6. **Generate Report** - Produces actionable recommendations
+1. **Fetch Prometheus Data** - Queries metrics for trends, success rates, workflow stages
+2. **Discover Skills/Agents** - Scans `~/.claude/skills/`, `~/.claude/agents/`, and project directories
+3. **Parse JSONL Sessions** - Reads session files for detailed context
+4. **Correlate Data** - Combines both sources for richer insights:
+   - Declining usage + missed opportunities → high priority recommendation
+   - Workflow stage gaps → process improvement suggestions
+   - Success rate correlation → skill effectiveness analysis
+5. **Generate Report** - Produces actionable insights with specific examples
 
-## Output
+## Insights Generated
 
-- **Missed Opportunities** - Prompts where a skill/agent should have been used
-- **Usage Statistics** - Which skills/agents are used most/least
-- **Recommendations** - Suggestions for workflow improvement
+| Insight Type | Severity | Example |
+|--------------|----------|---------|
+| `declining_with_missed` | 🔴 High | "brainstorming usage down 40% but 3 prompts matched triggers" |
+| `workflow_gap` | 🟡 Medium | "Workflow stages rarely used: review, test" |
+| `missed_opportunity` | 🟢 Low | "systematic-debugging could have been used 2 times" |
 
-## Resources
+## Configuration
 
-### scripts/
-- `analyze_usage.py` - Main analysis script with dynamic discovery
+Prometheus endpoint is configured during `/observability:setup`:
+
+```bash
+# In ${CLAUDE_PLUGIN_ROOT}/config/endpoint.env
+OTEL_ENDPOINT=http://localhost:30418
+PROMETHEUS_ENDPOINT=http://localhost:9090
+```
+
+If Prometheus is unavailable, the analyzer gracefully falls back to JSONL-only mode.
+
+## Troubleshooting
+
+### No Prometheus data
+
+1. Check endpoint is configured: `cat ${CLAUDE_PLUGIN_ROOT}/config/endpoint.env`
+2. Verify Prometheus is accessible (OrbStack DNS):
+   ```bash
+   curl "http://prometheus-kube-prometheus-prometheus.observability.svc.cluster.local:9090/api/v1/query?query=up"
+   ```
+3. If not using OrbStack, port-forward instead:
+   ```bash
+   kubectl config use-context <your-context>
+   kubectl port-forward -n observability svc/prometheus-kube-prometheus-prometheus 9090:9090 &
+   # Then set PROMETHEUS_ENDPOINT=http://localhost:9090
+   ```
+
+### No JSONL sessions found
+
+Sessions are stored in `~/.claude/projects/<project-path>/`. Ensure you're running from the correct project directory or use `--project /path/to/project`.

@@ -1,22 +1,30 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["pyyaml"]
+# dependencies = ["pyyaml", "requests"]
 # ///
 """
 Usage Analyzer - Identify missed skill/agent opportunities in Claude Code sessions.
 
-Dynamically discovers available skills and agents, extracts trigger patterns,
-and analyzes session history to find missed opportunities.
+Combines two data sources:
+1. Prometheus metrics - aggregates, trends, success rates
+2. JSONL session files - detailed context, exact prompts
+
+Produces enriched insights with both trend data and specific examples.
 """
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
+
+import requests
 
 
 @dataclass
@@ -45,6 +53,154 @@ class MissedOpportunity:
     matched_triggers: list[str]
 
 
+@dataclass
+class PrometheusData:
+    skill_usage: dict[str, float] = field(default_factory=dict)
+    agent_usage: dict[str, float] = field(default_factory=dict)
+    skill_trends: dict[str, float] = field(default_factory=dict)  # % change
+    agent_trends: dict[str, float] = field(default_factory=dict)
+    overall_success_rate: float = 0.0
+    skill_success_rates: dict[str, float] = field(default_factory=dict)
+    workflow_stages: dict[str, int] = field(default_factory=dict)
+    available: bool = False
+    error: Optional[str] = None
+
+
+# =============================================================================
+# Prometheus Fetcher
+# =============================================================================
+
+def get_prometheus_endpoint() -> Optional[str]:
+    """Get Prometheus endpoint from plugin config or env."""
+    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    if plugin_root:
+        config_file = Path(plugin_root) / "config" / "endpoint.env"
+        if config_file.exists():
+            for line in config_file.read_text().splitlines():
+                if line.startswith("PROMETHEUS_ENDPOINT="):
+                    return line.split("=", 1)[1].strip()
+
+    return os.environ.get("PROMETHEUS_ENDPOINT")
+
+
+def query_prometheus(endpoint: str, query: str, timeout: int = 5) -> Optional[dict]:
+    """Execute a PromQL query."""
+    try:
+        response = requests.get(
+            f"{endpoint}/api/v1/query",
+            params={"query": query},
+            timeout=timeout
+        )
+        if response.status_code == 200:
+            return response.json()
+    except requests.RequestException:
+        pass
+    return None
+
+
+def fetch_prometheus_data(endpoint: str, time_range: str = "7d") -> PrometheusData:
+    """Fetch all relevant metrics from Prometheus."""
+    data = PrometheusData()
+
+    # Test connection
+    test = query_prometheus(endpoint, "up", timeout=3)
+    if test is None:
+        data.error = f"Cannot connect to Prometheus at {endpoint}"
+        return data
+
+    data.available = True
+
+    # Skill usage (current period)
+    result = query_prometheus(
+        endpoint,
+        f'sum by (skill_name) (increase(claude_code_skill_invocations[{time_range}]))'
+    )
+    if result and result.get("data", {}).get("result"):
+        for item in result["data"]["result"]:
+            skill = item["metric"].get("skill_name", "unknown")
+            value = float(item["value"][1])
+            if value > 0:
+                data.skill_usage[skill] = value
+
+    # Agent usage (current period)
+    result = query_prometheus(
+        endpoint,
+        f'sum by (agent_type) (increase(claude_code_agent_invocations[{time_range}]))'
+    )
+    if result and result.get("data", {}).get("result"):
+        for item in result["data"]["result"]:
+            agent = item["metric"].get("agent_type", "unknown")
+            value = float(item["value"][1])
+            if value > 0:
+                data.agent_usage[agent] = value
+
+    # Skill trends (compare with previous period)
+    result = query_prometheus(
+        endpoint,
+        f'sum by (skill_name) (increase(claude_code_skill_invocations[{time_range}] offset {time_range}))'
+    )
+    if result and result.get("data", {}).get("result"):
+        prev_usage = {}
+        for item in result["data"]["result"]:
+            skill = item["metric"].get("skill_name", "unknown")
+            prev_usage[skill] = float(item["value"][1])
+
+        for skill, current in data.skill_usage.items():
+            prev = prev_usage.get(skill, 0)
+            if prev > 0:
+                data.skill_trends[skill] = ((current - prev) / prev) * 100
+            elif current > 0:
+                data.skill_trends[skill] = 100.0  # New usage
+
+    # Agent trends
+    result = query_prometheus(
+        endpoint,
+        f'sum by (agent_type) (increase(claude_code_agent_invocations[{time_range}] offset {time_range}))'
+    )
+    if result and result.get("data", {}).get("result"):
+        prev_usage = {}
+        for item in result["data"]["result"]:
+            agent = item["metric"].get("agent_type", "unknown")
+            prev_usage[agent] = float(item["value"][1])
+
+        for agent, current in data.agent_usage.items():
+            prev = prev_usage.get(agent, 0)
+            if prev > 0:
+                data.agent_trends[agent] = ((current - prev) / prev) * 100
+            elif current > 0:
+                data.agent_trends[agent] = 100.0
+
+    # Overall success rate
+    result = query_prometheus(
+        endpoint,
+        f'sum(increase(claude_code_outcome_success[{time_range}])) / '
+        f'(sum(increase(claude_code_outcome_success[{time_range}])) + '
+        f'sum(increase(claude_code_outcome_failure[{time_range}])))'
+    )
+    if result and result.get("data", {}).get("result"):
+        value = result["data"]["result"][0]["value"][1]
+        if value != "NaN":
+            data.overall_success_rate = float(value) * 100
+
+    # Workflow stages
+    result = query_prometheus(
+        endpoint,
+        f'sum by (to_stage) (increase(claude_code_workflow_stage_transition[{time_range}]))'
+    )
+    if result and result.get("data", {}).get("result"):
+        for item in result["data"]["result"]:
+            stage = item["metric"].get("to_stage", "unknown")
+            value = int(float(item["value"][1]))
+            if value > 0:
+                data.workflow_stages[stage] = value
+
+    return data
+
+
+# =============================================================================
+# JSONL Parser (existing, slightly modified)
+# =============================================================================
+
 def extract_yaml_frontmatter(content: str) -> dict:
     """Extract YAML frontmatter from markdown content."""
     import yaml
@@ -66,7 +222,6 @@ def extract_triggers_from_description(description: str) -> list[str]:
     """Extract trigger phrases from a description string."""
     triggers = []
 
-    # Look for explicit trigger patterns
     trigger_patterns = [
         r'[Tt]riggers?\s+on\s+["\']([^"\']+)["\']',
         r'[Tt]riggers?\s+on\s+([^,.]+(?:,\s*[^,.]+)*)',
@@ -77,11 +232,9 @@ def extract_triggers_from_description(description: str) -> list[str]:
     for pattern in trigger_patterns:
         matches = re.findall(pattern, description)
         for match in matches:
-            # Split on commas and "or"
             parts = re.split(r',\s*|\s+or\s+', match)
             triggers.extend([p.strip().strip('"\'') for p in parts if p.strip()])
 
-    # Also extract quoted phrases
     quoted = re.findall(r'["\']([^"\']+)["\']', description)
     triggers.extend(quoted)
 
@@ -169,14 +322,11 @@ def discover_agents(paths: list[Path]) -> list[SkillOrAgent]:
 
 
 def _is_system_prompt(content: str) -> bool:
-    """Filter out system-generated prompts that shouldn't be analyzed."""
-    # Skill loading messages
+    """Filter out system-generated prompts."""
     if content.startswith("Base directory for this skill:"):
         return True
-    # Subagent trace IDs
     if content.startswith("[TRACE-ID:"):
         return True
-    # Command messages (skill invocations)
     if "<command-message>" in content or "<command-name>" in content:
         return True
     return False
@@ -184,14 +334,12 @@ def _is_system_prompt(content: str) -> bool:
 
 def find_project_sessions(projects_dir: Path, project_path: str, max_sessions: int) -> list[Path]:
     """Find session files for a project."""
-    # Convert project path to folder name format (e.g., /Users/foo/bar -> -Users-foo-bar)
     project_folder = project_path.replace("/", "-")
-
     project_dir = projects_dir / project_folder
+
     if not project_dir.exists():
         return []
 
-    # Get most recent session files
     session_files = sorted(
         project_dir.glob("*.jsonl"),
         key=lambda p: p.stat().st_mtime,
@@ -217,9 +365,7 @@ def parse_session_file(session_path: Path) -> SessionData:
                     message = entry.get("message", {})
                     content = message.get("content", "")
 
-                    # Extract actual text prompts (not tool results)
                     if isinstance(content, str) and content.strip():
-                        # Filter out system-generated messages
                         if not _is_system_prompt(content):
                             session_data.prompts.append(content)
                     elif isinstance(content, list):
@@ -262,13 +408,7 @@ def parse_session_file(session_path: Path) -> SessionData:
 
 
 def find_matches(prompt: str, items: list[SkillOrAgent], min_triggers: int = 2) -> list[tuple[SkillOrAgent, list[str]]]:
-    """Find skills/agents that match a prompt based on triggers.
-
-    Args:
-        prompt: User prompt to match against
-        items: Skills/agents to check
-        min_triggers: Minimum number of triggers that must match (reduces false positives)
-    """
+    """Find skills/agents that match a prompt based on triggers."""
     matches = []
     prompt_lower = prompt.lower()
 
@@ -276,12 +416,10 @@ def find_matches(prompt: str, items: list[SkillOrAgent], min_triggers: int = 2) 
         matched_triggers = []
         for trigger in item.triggers:
             trigger_lower = trigger.lower()
-            if len(trigger_lower) > 3:  # Skip very short triggers
+            if len(trigger_lower) > 3:
                 if re.search(r'\b' + re.escape(trigger_lower) + r'\b', prompt_lower):
                     matched_triggers.append(trigger)
 
-        # Require multiple trigger matches to reduce false positives
-        # Exception: if the item name itself matched, that's a strong signal
         name_matched = item.name.lower() in [t.lower() for t in matched_triggers]
         if len(matched_triggers) >= min_triggers or name_matched:
             matches.append((item, matched_triggers))
@@ -289,7 +427,7 @@ def find_matches(prompt: str, items: list[SkillOrAgent], min_triggers: int = 2) 
     return matches
 
 
-def analyze(
+def analyze_jsonl(
     skills: list[SkillOrAgent],
     agents: list[SkillOrAgent],
     sessions: list[SessionData],
@@ -308,13 +446,11 @@ def analyze(
     all_items = skills + agents
 
     for session in sessions:
-        # Track actual usage
         for skill in session.skills_used:
             stats["skills_used"][skill] += 1
         for agent in session.agents_used:
             stats["agents_used"][agent] += 1
 
-        # Check each prompt for potential matches
         for prompt in session.prompts:
             matches = find_matches(prompt, all_items)
 
@@ -341,29 +477,211 @@ def analyze(
     return missed, stats
 
 
-def print_table(missed: list[MissedOpportunity], stats: dict, verbose: bool):
+# =============================================================================
+# Correlation Engine
+# =============================================================================
+
+@dataclass
+class Insight:
+    type: str  # declining_usage, low_success, workflow_gap, missed_opportunity
+    severity: str  # high, medium, low
+    item_name: str
+    item_type: str  # skill, agent
+    message: str
+    details: dict = field(default_factory=dict)
+
+
+def correlate_data(
+    prom_data: PrometheusData,
+    jsonl_stats: dict,
+    missed: list[MissedOpportunity],
+) -> list[Insight]:
+    """Generate insights by correlating Prometheus and JSONL data."""
+    insights = []
+
+    if prom_data.available:
+        # Declining usage with missed opportunities
+        for skill, trend in prom_data.skill_trends.items():
+            if trend < -20:  # Declining more than 20%
+                missed_count = jsonl_stats["missed_skills"].get(skill, 0)
+                if missed_count > 0:
+                    insights.append(Insight(
+                        type="declining_with_missed",
+                        severity="high",
+                        item_name=skill,
+                        item_type="skill",
+                        message=f"{skill} usage down {abs(trend):.0f}% but {missed_count} prompts matched triggers",
+                        details={
+                            "trend": trend,
+                            "missed_count": missed_count,
+                            "current_usage": prom_data.skill_usage.get(skill, 0),
+                        }
+                    ))
+
+        # Same for agents
+        for agent, trend in prom_data.agent_trends.items():
+            if trend < -20:
+                missed_count = jsonl_stats["missed_agents"].get(agent, 0)
+                if missed_count > 0:
+                    insights.append(Insight(
+                        type="declining_with_missed",
+                        severity="high",
+                        item_name=agent,
+                        item_type="agent",
+                        message=f"{agent} usage down {abs(trend):.0f}% but {missed_count} prompts matched triggers",
+                        details={
+                            "trend": trend,
+                            "missed_count": missed_count,
+                            "current_usage": prom_data.agent_usage.get(agent, 0),
+                        }
+                    ))
+
+        # Workflow stage gaps
+        expected_stages = ["brainstorm", "plan", "implement", "test", "review", "commit"]
+        missing_stages = [s for s in expected_stages if s not in prom_data.workflow_stages]
+        if missing_stages:
+            insights.append(Insight(
+                type="workflow_gap",
+                severity="medium",
+                item_name="workflow",
+                item_type="process",
+                message=f"Workflow stages rarely used: {', '.join(missing_stages)}",
+                details={
+                    "missing": missing_stages,
+                    "present": list(prom_data.workflow_stages.keys()),
+                }
+            ))
+
+    # Pure JSONL insights (missed opportunities)
+    top_missed_skills = sorted(jsonl_stats["missed_skills"].items(), key=lambda x: -x[1])[:3]
+    for skill, count in top_missed_skills:
+        if count >= 2:
+            examples = [m for m in missed if m.matched_item.name == skill][:2]
+            insights.append(Insight(
+                type="missed_opportunity",
+                severity="medium" if count >= 3 else "low",
+                item_name=skill,
+                item_type="skill",
+                message=f"{skill} could have been used {count} times",
+                details={
+                    "count": count,
+                    "examples": [{"session": e.session_id, "prompt": e.prompt[:80]} for e in examples],
+                }
+            ))
+
+    top_missed_agents = sorted(jsonl_stats["missed_agents"].items(), key=lambda x: -x[1])[:3]
+    for agent, count in top_missed_agents:
+        if count >= 2:
+            examples = [m for m in missed if m.matched_item.name == agent][:2]
+            insights.append(Insight(
+                type="missed_opportunity",
+                severity="medium" if count >= 3 else "low",
+                item_name=agent,
+                item_type="agent",
+                message=f"{agent} could have been used {count} times",
+                details={
+                    "count": count,
+                    "examples": [{"session": e.session_id, "prompt": e.prompt[:80]} for e in examples],
+                }
+            ))
+
+    return sorted(insights, key=lambda x: {"high": 0, "medium": 1, "low": 2}[x.severity])
+
+
+# =============================================================================
+# Output Formatters
+# =============================================================================
+
+def trend_arrow(value: float) -> str:
+    """Return trend arrow based on percentage change."""
+    if value > 10:
+        return "↑"
+    elif value < -10:
+        return "↓"
+    return "↔"
+
+
+def progress_bar(value: float, max_value: float, width: int = 10) -> str:
+    """Create ASCII progress bar."""
+    if max_value == 0:
+        return "░" * width
+    filled = int((value / max_value) * width)
+    return "█" * filled + "░" * (width - filled)
+
+
+def print_table(
+    prom_data: PrometheusData,
+    jsonl_stats: dict,
+    insights: list[Insight],
+    missed: list[MissedOpportunity],
+    verbose: bool,
+):
     """Print analysis results as formatted table."""
     print("\n" + "=" * 80)
     print("USAGE ANALYSIS REPORT")
+    if prom_data.available:
+        print("(with Prometheus metrics)")
+    else:
+        print("(JSONL only - Prometheus unavailable)")
     print("=" * 80)
 
-    print(f"\nSessions analyzed: {stats['total_sessions']}")
-    print(f"Prompts analyzed: {stats['total_prompts']}")
+    print(f"\nSessions analyzed: {jsonl_stats['total_sessions']}")
+    print(f"Prompts analyzed: {jsonl_stats['total_prompts']}")
     print(f"Missed opportunities: {len(missed)}")
 
-    if stats["skills_used"]:
-        print("\n--- Skills Used ---")
-        for skill, count in sorted(stats["skills_used"].items(), key=lambda x: -x[1]):
+    if prom_data.available:
+        print(f"Overall success rate: {prom_data.overall_success_rate:.1f}%")
+
+    # Prometheus trends section
+    if prom_data.available and (prom_data.skill_usage or prom_data.agent_usage):
+        print("\n📊 TRENDS (vs previous period)")
+
+        if prom_data.skill_usage:
+            print("\n  Skills:")
+            for skill, count in sorted(prom_data.skill_usage.items(), key=lambda x: -x[1])[:8]:
+                trend = prom_data.skill_trends.get(skill, 0)
+                arrow = trend_arrow(trend)
+                trend_str = f"{trend:+.0f}%" if trend != 0 else ""
+                print(f"    {skill:25} {count:4.0f} {arrow} {trend_str}")
+
+        if prom_data.agent_usage:
+            print("\n  Agents:")
+            for agent, count in sorted(prom_data.agent_usage.items(), key=lambda x: -x[1])[:8]:
+                trend = prom_data.agent_trends.get(agent, 0)
+                arrow = trend_arrow(trend)
+                trend_str = f"{trend:+.0f}%" if trend != 0 else ""
+                print(f"    {agent:25} {count:4.0f} {arrow} {trend_str}")
+
+        if prom_data.workflow_stages:
+            print("\n📋 WORKFLOW STAGES")
+            for stage, count in sorted(prom_data.workflow_stages.items(), key=lambda x: -x[1]):
+                print(f"    {stage:15} {count:4}")
+
+    # JSONL usage stats
+    if jsonl_stats["skills_used"]:
+        print("\n--- Skills Used (from JSONL) ---")
+        for skill, count in sorted(jsonl_stats["skills_used"].items(), key=lambda x: -x[1]):
             print(f"  {skill}: {count}")
 
-    if stats["agents_used"]:
-        print("\n--- Agents Used ---")
-        for agent, count in sorted(stats["agents_used"].items(), key=lambda x: -x[1]):
+    if jsonl_stats["agents_used"]:
+        print("\n--- Agents Used (from JSONL) ---")
+        for agent, count in sorted(jsonl_stats["agents_used"].items(), key=lambda x: -x[1]):
             print(f"  {agent}: {count}")
 
-    if missed:
-        print("\n--- Missed Opportunities ---")
+    # Insights section
+    if insights:
+        print("\n💡 INSIGHTS")
+        for insight in insights:
+            severity_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}[insight.severity]
+            print(f"\n  {severity_icon} [{insight.item_type.upper()}] {insight.message}")
 
+            if verbose and insight.details.get("examples"):
+                for ex in insight.details["examples"][:2]:
+                    print(f"      Session {ex['session']}: \"{ex['prompt']}...\"")
+
+    # Missed opportunities (detailed)
+    if missed and verbose:
+        print("\n--- Missed Opportunities (detailed) ---")
         by_item = defaultdict(list)
         for m in missed:
             by_item[f"{m.matched_item.type}:{m.matched_item.name}"].append(m)
@@ -371,34 +689,151 @@ def print_table(missed: list[MissedOpportunity], stats: dict, verbose: bool):
         for key, items in sorted(by_item.items(), key=lambda x: -len(x[1]))[:10]:
             item_type, item_name = key.split(":", 1)
             print(f"\n  [{item_type.upper()}] {item_name} (missed {len(items)} times)")
+            for m in items[:3]:
+                prompt_preview = m.prompt[:80].replace("\n", " ")
+                print(f"    Session {m.session_id}: \"{prompt_preview}...\"")
 
-            if verbose:
-                for m in items[:3]:
-                    prompt_preview = m.prompt[:80].replace("\n", " ")
-                    print(f"    Session {m.session_id}: \"{prompt_preview}...\"")
-                    print(f"      Triggers: {', '.join(m.matched_triggers[:3])}")
-
+    # Recommendations
     print("\n--- Recommendations ---")
-
-    if stats["missed_skills"]:
-        top_missed = sorted(stats["missed_skills"].items(), key=lambda x: -x[1])[:5]
-        print("\n  Consider using these skills more:")
-        for skill, count in top_missed:
-            print(f"    - {skill} ({count} opportunities)")
-
-    if stats["missed_agents"]:
-        top_missed = sorted(stats["missed_agents"].items(), key=lambda x: -x[1])[:5]
-        print("\n  Consider using these agents more:")
-        for agent, count in top_missed:
-            print(f"    - {agent} ({count} opportunities)")
+    if insights:
+        for insight in insights[:5]:
+            if insight.type == "declining_with_missed":
+                print(f"  • Use {insight.item_name} more - usage declining but opportunities exist")
+            elif insight.type == "workflow_gap":
+                print(f"  • Add missing workflow stages: {', '.join(insight.details.get('missing', []))}")
+            elif insight.type == "missed_opportunity":
+                print(f"  • Consider using {insight.item_name} ({insight.item_type}) more often")
+    elif not missed:
+        print("  ✓ Great job! No significant missed opportunities detected.")
 
     print("\n" + "=" * 80)
 
 
+def print_dashboard(
+    prom_data: PrometheusData,
+    jsonl_stats: dict,
+    insights: list[Insight],
+):
+    """Print dashboard-style output with ASCII charts."""
+    print("\n┌" + "─" * 78 + "┐")
+    print("│" + " USAGE DASHBOARD ".center(78) + "│")
+    print("└" + "─" * 78 + "┘")
+
+    # Two-column layout
+    if prom_data.available:
+        # Skills column
+        print("\n┌─ Skills " + "─" * 27 + "┐  ┌─ Success Rate " + "─" * 20 + "┐")
+
+        max_skill = max(prom_data.skill_usage.values()) if prom_data.skill_usage else 1
+        skill_lines = []
+        for skill, count in sorted(prom_data.skill_usage.items(), key=lambda x: -x[1])[:5]:
+            trend = prom_data.skill_trends.get(skill, 0)
+            arrow = trend_arrow(trend)
+            bar = progress_bar(count, max_skill, 8)
+            skill_lines.append(f"│ {skill[:15]:15} {bar} {count:3.0f} {arrow} │")
+
+        # Success rate column
+        success_lines = [
+            f"│ Overall:  {progress_bar(prom_data.overall_success_rate, 100, 10)} {prom_data.overall_success_rate:5.1f}% │",
+        ]
+
+        # Pad to same length
+        while len(skill_lines) < 5:
+            skill_lines.append("│" + " " * 36 + "│")
+        while len(success_lines) < 5:
+            success_lines.append("│" + " " * 36 + "│")
+
+        for s, r in zip(skill_lines, success_lines):
+            print(f"{s}  {r}")
+
+        print("└" + "─" * 36 + "┘  └" + "─" * 36 + "┘")
+
+        # Workflow stages
+        if prom_data.workflow_stages:
+            print("\n┌─ Workflow Stages " + "─" * 58 + "┐")
+            stages = ["brainstorm", "plan", "implement", "test", "review", "commit"]
+            stage_str = ""
+            for stage in stages:
+                count = prom_data.workflow_stages.get(stage, 0)
+                if count > 0:
+                    stage_str += f" {stage}({count}) →"
+                else:
+                    stage_str += f" [{stage}] →"
+            print(f"│ {stage_str[:-2]:74} │")
+            print("└" + "─" * 76 + "┘")
+    else:
+        print("\n⚠ Prometheus unavailable - showing JSONL data only")
+        print(f"\n  Sessions: {jsonl_stats['total_sessions']} | Prompts: {jsonl_stats['total_prompts']}")
+
+    # Insights summary
+    if insights:
+        print("\n┌─ Top Insights " + "─" * 61 + "┐")
+        for insight in insights[:4]:
+            severity_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}[insight.severity]
+            msg = insight.message[:70]
+            print(f"│ {severity_icon} {msg:72} │")
+        print("└" + "─" * 76 + "┘")
+
+    print()
+
+
+def print_json(
+    prom_data: PrometheusData,
+    jsonl_stats: dict,
+    insights: list[Insight],
+    missed: list[MissedOpportunity],
+):
+    """Print analysis results as JSON."""
+    output = {
+        "prometheus": {
+            "available": prom_data.available,
+            "error": prom_data.error,
+            "skill_usage": prom_data.skill_usage,
+            "agent_usage": prom_data.agent_usage,
+            "skill_trends": prom_data.skill_trends,
+            "agent_trends": prom_data.agent_trends,
+            "overall_success_rate": prom_data.overall_success_rate,
+            "workflow_stages": prom_data.workflow_stages,
+        },
+        "jsonl": {
+            "sessions": jsonl_stats["total_sessions"],
+            "prompts": jsonl_stats["total_prompts"],
+            "skills_used": dict(jsonl_stats["skills_used"]),
+            "agents_used": dict(jsonl_stats["agents_used"]),
+            "missed_skills": dict(jsonl_stats["missed_skills"]),
+            "missed_agents": dict(jsonl_stats["missed_agents"]),
+        },
+        "insights": [
+            {
+                "type": i.type,
+                "severity": i.severity,
+                "item_name": i.item_name,
+                "item_type": i.item_type,
+                "message": i.message,
+                "details": i.details,
+            }
+            for i in insights
+        ],
+        "missed_opportunities": [
+            {
+                "session": m.session_id,
+                "prompt": m.prompt[:200],
+                "suggested": m.matched_item.name,
+                "type": m.matched_item.type,
+                "triggers": m.matched_triggers,
+            }
+            for m in missed[:50]
+        ],
+    }
+    print(json.dumps(output, indent=2))
+
+
+# =============================================================================
+# Quick Stats (existing, uses session summaries)
+# =============================================================================
+
 def analyze_session_summaries(summary_dir: Path, days: int = 14) -> dict:
     """Analyze session summaries for quick stats."""
-    from datetime import datetime, timedelta
-
     cutoff = datetime.now() - timedelta(days=days)
     stats = {
         "sessions": 0,
@@ -416,7 +851,6 @@ def analyze_session_summaries(summary_dir: Path, days: int = 14) -> dict:
 
     for summary_file in summary_dir.glob("*.json"):
         try:
-            # Parse date from filename (YYYY-MM-DD_sessionid.json)
             date_str = summary_file.name[:10]
             file_date = datetime.strptime(date_str, "%Y-%m-%d")
 
@@ -486,50 +920,27 @@ def print_quick_stats(stats: dict, days: int):
     print("\n" + "=" * 80)
 
 
-def print_json(missed: list[MissedOpportunity], stats: dict):
-    """Print analysis results as JSON."""
-    output = {
-        "summary": {
-            "sessions": stats["total_sessions"],
-            "prompts": stats["total_prompts"],
-            "missed_opportunities": len(missed),
-        },
-        "usage": {
-            "skills": dict(stats["skills_used"]),
-            "agents": dict(stats["agents_used"]),
-        },
-        "missed": {
-            "skills": dict(stats["missed_skills"]),
-            "agents": dict(stats["missed_agents"]),
-        },
-        "opportunities": [
-            {
-                "session": m.session_id,
-                "prompt": m.prompt[:200],
-                "suggested": m.matched_item.name,
-                "type": m.matched_item.type,
-                "triggers": m.matched_triggers,
-            }
-            for m in missed[:50]
-        ],
-    }
-    print(json.dumps(output, indent=2))
-
+# =============================================================================
+# Main
+# =============================================================================
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze Claude Code usage patterns")
     parser.add_argument("--sessions", type=int, default=10, help="Sessions to analyze")
-    parser.add_argument("--format", choices=["table", "json"], default="table")
+    parser.add_argument("--format", choices=["table", "dashboard", "json"], default="table")
     parser.add_argument("--verbose", action="store_true", help="Show examples")
     parser.add_argument("--project", help="Project path (default: current directory)")
     parser.add_argument("--quick-stats", action="store_true", help="Show quick stats from session summaries")
     parser.add_argument("--days", type=int, default=14, help="Days to include in quick stats (default: 14)")
+    parser.add_argument("--no-prometheus", action="store_true", help="Skip Prometheus even if available")
+    parser.add_argument("--prometheus-endpoint", help="Override Prometheus endpoint")
+    parser.add_argument("--range", choices=["7d", "14d", "30d"], default="7d", help="Time range for Prometheus queries")
     args = parser.parse_args()
 
     home = Path.home()
     cwd = Path.cwd()
 
-    # Quick stats mode - uses session summaries
+    # Quick stats mode
     if args.quick_stats:
         summary_dir = home / ".claude" / "session-summaries"
         stats = analyze_session_summaries(summary_dir, args.days)
@@ -537,6 +948,18 @@ def main():
         return
 
     project_path = args.project or str(cwd)
+
+    # Fetch Prometheus data (unless disabled)
+    prom_data = PrometheusData()
+    if not args.no_prometheus:
+        endpoint = args.prometheus_endpoint or get_prometheus_endpoint()
+        if endpoint:
+            print(f"Fetching Prometheus data from {endpoint}...", file=sys.stderr)
+            prom_data = fetch_prometheus_data(endpoint, args.range)
+            if prom_data.error:
+                print(f"Warning: {prom_data.error}", file=sys.stderr)
+        else:
+            print("No Prometheus endpoint configured, using JSONL only", file=sys.stderr)
 
     # Discover skills and agents
     skill_paths = [home / ".claude" / "skills", cwd / ".claude" / "skills"]
@@ -554,14 +977,19 @@ def main():
     print(f"Parsing {len(session_files)} sessions...", file=sys.stderr)
     sessions = [parse_session_file(f) for f in session_files]
 
-    # Analyze
-    missed, stats = analyze(skills, agents, sessions)
+    # Analyze JSONL
+    missed, jsonl_stats = analyze_jsonl(skills, agents, sessions)
+
+    # Correlate data
+    insights = correlate_data(prom_data, jsonl_stats, missed)
 
     # Output
     if args.format == "json":
-        print_json(missed, stats)
+        print_json(prom_data, jsonl_stats, insights, missed)
+    elif args.format == "dashboard":
+        print_dashboard(prom_data, jsonl_stats, insights)
     else:
-        print_table(missed, stats, args.verbose)
+        print_table(prom_data, jsonl_stats, insights, missed, args.verbose)
 
 
 if __name__ == "__main__":

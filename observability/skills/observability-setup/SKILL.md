@@ -82,13 +82,26 @@ kubectl get svc otel-collector-external -n observability
 curl -s http://localhost:30418/v1/metrics -X POST -d '{}' || echo "Connection OK"
 ```
 
-### Step 6: Configure Endpoint (Auto)
+### Step 6: Configure Endpoints (Auto)
 
 The setup script will write the endpoint configuration:
 
 ```bash
 mkdir -p ${CLAUDE_PLUGIN_ROOT}/config
+
+# OTEL endpoint for pushing metrics
 echo "OTEL_ENDPOINT=http://localhost:30418" > ${CLAUDE_PLUGIN_ROOT}/config/endpoint.env
+
+# Prometheus endpoint for querying metrics (used by usage-analyzer)
+# With OrbStack, you can use cluster DNS directly (no port-forward needed!)
+echo "PROMETHEUS_ENDPOINT=http://prometheus-kube-prometheus-prometheus.observability.svc.cluster.local:9090" >> ${CLAUDE_PLUGIN_ROOT}/config/endpoint.env
+```
+
+**Note:** OrbStack provides DNS resolution to cluster services, so `*.svc.cluster.local` works from your Mac. If you're using minikube or another setup, you may need to port-forward:
+```bash
+kubectl config use-context orbstack  # or your context
+kubectl port-forward -n observability svc/prometheus-kube-prometheus-prometheus 9090:9090 &
+# Then use PROMETHEUS_ENDPOINT=http://localhost:9090
 ```
 
 ## Post-Setup
