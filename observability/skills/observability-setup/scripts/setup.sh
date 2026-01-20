@@ -57,7 +57,7 @@ else
 fi
 
 echo ""
-echo "=== Step 6: Create NodePort service for external access ==="
+echo "=== Step 6: Create NodePort services for external access ==="
 kubectl apply -f - <<EOF
 apiVersion: v1
 kind: Service
@@ -82,6 +82,22 @@ spec:
       port: 8889
       targetPort: 8889
       nodePort: 30889
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-external
+  namespace: observability
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: prometheus
+    prometheus: kube-prometheus-stack-prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+      nodePort: 30090
 EOF
 
 echo ""
@@ -99,7 +115,7 @@ PLUGIN_CONFIG_DIR="${CLAUDE_PLUGIN_ROOT:-$SKILL_DIR/../..}/config"
 mkdir -p "$PLUGIN_CONFIG_DIR"
 cat > "$PLUGIN_CONFIG_DIR/endpoint.env" << 'EOF'
 OTEL_ENDPOINT=http://localhost:30418
-PROMETHEUS_ENDPOINT=http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090
+PROMETHEUS_ENDPOINT=http://localhost:30090
 EOF
 cat "$PLUGIN_CONFIG_DIR/endpoint.env"
 
@@ -107,13 +123,13 @@ echo ""
 echo "=== Step 10: Verify deployment ==="
 kubectl get pods -n observability
 echo ""
-kubectl get svc otel-collector-external -n observability
+kubectl get svc otel-collector-external prometheus-external -n observability
 echo ""
-kubectl get endpoints otel-collector-external -n observability
+kubectl get endpoints otel-collector-external prometheus-external -n observability
 
 echo ""
 echo "=== Setup Complete ==="
 echo "OTEL HTTP: http://localhost:30418"
 echo "OTEL gRPC: http://localhost:30417"
-echo "Prometheus: http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090"
+echo "Prometheus: http://localhost:30090"
 echo "Grafana: kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80 -n observability"

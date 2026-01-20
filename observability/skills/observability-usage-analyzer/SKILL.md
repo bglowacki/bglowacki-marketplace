@@ -102,7 +102,7 @@ Prometheus endpoint is configured during `/observability:setup`:
 ```bash
 # In ${CLAUDE_PLUGIN_ROOT}/config/endpoint.env
 OTEL_ENDPOINT=http://localhost:30418
-PROMETHEUS_ENDPOINT=http://localhost:9090
+PROMETHEUS_ENDPOINT=http://localhost:30090
 ```
 
 If Prometheus is unavailable, the analyzer gracefully falls back to JSONL-only mode.
@@ -112,15 +112,13 @@ If Prometheus is unavailable, the analyzer gracefully falls back to JSONL-only m
 ### No Prometheus data
 
 1. Check endpoint is configured: `cat ${CLAUDE_PLUGIN_ROOT}/config/endpoint.env`
-2. Verify Prometheus is accessible (OrbStack DNS):
+2. Verify Prometheus is accessible via NodePort:
    ```bash
-   curl "http://prometheus-kube-prometheus-prometheus.observability.svc.cluster.local:9090/api/v1/query?query=up"
+   curl "http://localhost:30090/api/v1/query?query=up"
    ```
-3. If not using OrbStack, port-forward instead:
+3. If NodePort isn't working, check the service:
    ```bash
-   kubectl config use-context <your-context>
-   kubectl port-forward -n observability svc/prometheus-kube-prometheus-prometheus 9090:9090 &
-   # Then set PROMETHEUS_ENDPOINT=http://localhost:9090
+   kubectl get svc prometheus-external -n observability
    ```
 
 ### No JSONL sessions found

@@ -11,8 +11,8 @@ echo "=== Step 1: Switch to orbstack context ==="
 kubectl config use-context orbstack
 
 echo ""
-echo "=== Step 2: Delete NodePort service ==="
-kubectl delete svc otel-collector-external -n observability --ignore-not-found=true
+echo "=== Step 2: Delete NodePort services ==="
+kubectl delete svc otel-collector-external prometheus-external -n observability --ignore-not-found=true
 
 echo ""
 echo "=== Step 3: Delete Prometheus Alerts ==="
