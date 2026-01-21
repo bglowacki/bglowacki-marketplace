@@ -121,7 +121,7 @@ spec:
       - observability
   endpoints:
     - port: prometheus
-      interval: 15s
+      interval: 5s
       path: /metrics
 EOF
 

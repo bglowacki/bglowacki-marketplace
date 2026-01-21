@@ -66,15 +66,15 @@ echo ""
 
 # Step 2: Wait for propagation
 echo "━━━ Step 2/3: Wait for Metrics Propagation ━━━"
-echo "  (OTEL exports every 5s, Prometheus scrapes every 15s)"
-wait_with_progress 20 "Waiting for metrics to propagate"
+echo "  (OTEL exports every 5s, Prometheus scrapes every 5s)"
+wait_with_progress 10 "Waiting for initial metrics export"
 echo ""
 
 # Step 3: Verify metrics with retries
 echo "━━━ Step 3/3: Verify Metrics in Prometheus ━━━"
 
-MAX_RETRIES=6
-RETRY_DELAY=10
+MAX_RETRIES=12
+RETRY_DELAY=5
 FOUND=false
 
 for ((attempt=1; attempt<=MAX_RETRIES; attempt++)); do
