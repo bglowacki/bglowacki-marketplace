@@ -29,6 +29,9 @@ else
     helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
         --namespace observability \
         --set prometheus.prometheusSpec.enableRemoteWriteReceiver=true \
+        --set prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.accessModes[0]=ReadWriteOnce \
+        --set prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.resources.requests.storage=10Gi \
+        --set prometheus.prometheusSpec.retention=30d \
         --set grafana.enabled=true \
         --set alertmanager.alertmanagerSpec.alertmanagerConfigSelector.matchLabels.alertmanagerConfig=local-webhook \
         --set alertmanager.alertmanagerSpec.alertmanagerConfigNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=observability \
