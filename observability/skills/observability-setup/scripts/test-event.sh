@@ -6,64 +6,125 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
 HOOK_SCRIPT="$PLUGIN_ROOT/hooks/send_event_otel.py"
 
-echo "=== Observability Test Event ==="
+# Progress spinner
+spin() {
+    local pid=$1
+    local delay=0.2
+    local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    while kill -0 "$pid" 2>/dev/null; do
+        for (( i=0; i<${#spinstr}; i++ )); do
+            printf "\r  %s %s" "${spinstr:$i:1}" "$2"
+            sleep $delay
+        done
+    done
+    printf "\r  ✓ %s\n" "$2"
+}
+
+# Progress with countdown
+wait_with_progress() {
+    local seconds=$1
+    local message=$2
+    for ((i=seconds; i>0; i--)); do
+        printf "\r  ⏳ %s (%ds remaining)  " "$message" "$i"
+        sleep 1
+    done
+    printf "\r  ✓ %s                    \n" "$message"
+}
+
+echo ""
+echo "╔══════════════════════════════════════════╗"
+echo "║     Observability Setup Verification     ║"
+echo "╚══════════════════════════════════════════╝"
 echo ""
 
 # Check if setup is complete
 if [ ! -f "$HOME/.claude/observability/endpoint.env" ]; then
-    echo "ERROR: Observability not configured. Run /observability-setup first."
+    echo "  ✗ ERROR: Observability not configured."
+    echo "    Run /observability-setup first."
     exit 1
 fi
 
 source "$HOME/.claude/observability/endpoint.env"
-echo "OTEL Endpoint: $OTEL_ENDPOINT"
-echo "Prometheus Endpoint: $PROMETHEUS_ENDPOINT"
-
+echo "  ℹ OTEL Endpoint: $OTEL_ENDPOINT"
+echo "  ℹ Prometheus Endpoint: $PROMETHEUS_ENDPOINT"
 echo ""
-echo "=== Step 1: Send test event via hook ==="
+
+# Step 1: Send test event
+echo "━━━ Step 1/3: Send Test Event ━━━"
 TEST_SESSION_ID="test-$(date +%s)"
 
-# Send a PostToolUse event (simulates a Bash tool execution)
 echo '{
   "session_id": "'"$TEST_SESSION_ID"'",
   "tool_name": "Bash",
   "tool_input": {"command": "echo test"},
   "tool_result": "test\nExit code: 0",
   "cwd": "/tmp/test-project"
-}' | "$HOOK_SCRIPT" --event-type PostToolUse --source-app test
+}' | "$HOOK_SCRIPT" --event-type PostToolUse --source-app test 2>/dev/null
 
-echo "Test event sent with session_id: $TEST_SESSION_ID"
-
+echo "  ✓ Test event sent (session: ${TEST_SESSION_ID:0:12}...)"
 echo ""
-echo "=== Step 2: Wait for metrics export and scrape (15s) ==="
-echo "(OTEL exports every 5s, Prometheus scrapes every 15s)"
-sleep 15
 
+# Step 2: Wait for propagation
+echo "━━━ Step 2/3: Wait for Metrics Propagation ━━━"
+echo "  (OTEL exports every 5s, Prometheus scrapes every 15s)"
+wait_with_progress 20 "Waiting for metrics to propagate"
 echo ""
-echo "=== Step 3: Query Prometheus for test metrics ==="
 
-# Query for tool invocations with retry
-for i in 1 2 3; do
-    echo "Attempt $i: Querying claude_code_hook_tool_invocations_total{source_app=\"test\"}..."
+# Step 3: Verify metrics with retries
+echo "━━━ Step 3/3: Verify Metrics in Prometheus ━━━"
+
+MAX_RETRIES=6
+RETRY_DELAY=10
+FOUND=false
+
+for ((attempt=1; attempt<=MAX_RETRIES; attempt++)); do
+    printf "  [%d/%d] Querying metrics..." "$attempt" "$MAX_RETRIES"
+
     RESULT=$(curl -s "${PROMETHEUS_ENDPOINT}/api/v1/query" \
-      --data-urlencode 'query=claude_code_hook_tool_invocations_total{source_app="test"}' \
-      | python3 -c "import sys,json; d=json.load(sys.stdin); r=d.get('data',{}).get('result',[]); print(f'Found {len(r)} test event(s)!' if r else 'Not found yet')" 2>/dev/null || echo "Query failed")
+      --data-urlencode 'query=claude_code_hook_tool_invocations_total{source_app="test"}' 2>/dev/null \
+      | python3 -c "import sys,json; d=json.load(sys.stdin); r=d.get('data',{}).get('result',[]); print(len(r))" 2>/dev/null || echo "0")
 
-    echo "Result: $RESULT"
-    if [[ "$RESULT" == *"Found"* ]]; then
+    if [[ "$RESULT" -gt 0 ]]; then
+        printf "\r  ✓ [%d/%d] Found %s test event(s) in Prometheus!     \n" "$attempt" "$MAX_RETRIES" "$RESULT"
+        FOUND=true
         break
+    else
+        printf "\r  ⏳ [%d/%d] Not found yet" "$attempt" "$MAX_RETRIES"
+        if [[ $attempt -lt $MAX_RETRIES ]]; then
+            printf ", retrying in %ds...\n" "$RETRY_DELAY"
+            sleep $RETRY_DELAY
+        else
+            printf "\n"
+        fi
     fi
-    [ $i -lt 3 ] && echo "Waiting 5s before retry..." && sleep 5
 done
 
 echo ""
-echo "=== Step 4: Show available Claude Code metrics ==="
-curl -s "${PROMETHEUS_ENDPOINT}/api/v1/label/__name__/values" \
-  | python3 -c "import sys,json; names=[n for n in json.load(sys.stdin).get('data',[]) if 'claude_code' in n]; print('\n'.join(names) if names else 'No claude_code metrics found yet')" 2>/dev/null || echo "Could not query metric names"
+
+# Show available metrics
+echo "━━━ Available Claude Code Metrics ━━━"
+METRICS=$(curl -s "${PROMETHEUS_ENDPOINT}/api/v1/label/__name__/values" 2>/dev/null \
+  | python3 -c "import sys,json; names=[n for n in json.load(sys.stdin).get('data',[]) if 'claude_code' in n]; print('\n'.join(names))" 2>/dev/null)
+
+if [[ -n "$METRICS" ]]; then
+    echo "$METRICS" | while read -r metric; do
+        echo "  • $metric"
+    done
+else
+    echo "  (no claude_code metrics found yet)"
+fi
 
 echo ""
-echo "=== Test Complete ==="
-echo ""
-echo "If metrics show 'Not found yet', they may need more time to propagate."
-echo "Check Prometheus UI: $PROMETHEUS_ENDPOINT"
-echo "Query: claude_code_hook_tool_invocations_total"
+echo "╔══════════════════════════════════════════╗"
+if $FOUND; then
+    echo "║  ✓ VERIFICATION PASSED                   ║"
+    echo "╠══════════════════════════════════════════╣"
+    echo "║  Events flow: Hook → OTEL → Prometheus   ║"
+else
+    echo "║  ⚠ VERIFICATION PENDING                  ║"
+    echo "╠══════════════════════════════════════════╣"
+    echo "║  Metrics may still be propagating.       ║"
+    echo "║  Check manually at:                      ║"
+    echo "║  $PROMETHEUS_ENDPOINT"
+fi
+echo "╚══════════════════════════════════════════╝"
