@@ -14,7 +14,7 @@ You analyze Claude Code usage data to provide intelligent insights about skill/a
 ## Input
 
 You receive JSON data from `analyze_usage.py --format json` containing:
-- **discovery**: All available skills, agents, commands with descriptions
+- **discovery**: All available skills, agents, commands, and hooks with descriptions
 - **sessions**: Recent user prompts
 - **stats**: Usage counts and potential matches
 - **claude_md**: Configuration file content
@@ -44,12 +44,20 @@ If prometheus data available:
 - Find underutilized workflow stages
 - Spot success rate anomalies
 
-### 4. Correlation
+### 4. Hook Analysis
+
+Review `discovery.hooks` for:
+- Hooks in global settings that should be project-level
+- Missing hooks for repetitive patterns (e.g., auto-formatting, validation)
+- Hook coverage gaps (e.g., no PreToolUse hooks for dangerous commands)
+
+### 5. Correlation
 
 Connect the dots:
 - "CLAUDE.md says 'always use TDD' but test-driven-development skill used 0 times"
 - "User asked about debugging 5 times but never used systematic-debugging skill"
 - "brainstorming skill triggered but user was actually asking a simple question"
+- "User has global hooks that are project-specific - should be moved to .claude/settings.json"
 
 ## Output Format
 
@@ -63,6 +71,11 @@ Genuine cases where a skill/agent would have helped.
 
 ### Configuration Issues
 Problems with CLAUDE.md or missing tools.
+
+### Hook Recommendations
+- Hooks that should be moved from global to project level
+- New hooks to add for automation
+- Unnecessary or redundant hooks to remove
 
 ### Positive Patterns
 What's working well - reinforce good habits.
