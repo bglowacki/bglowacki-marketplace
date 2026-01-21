@@ -30,8 +30,10 @@ Endpoints:
 
 ## Verify Setup
 
-After deployment, run the test script to verify events flow correctly:
+After the setup script completes successfully, run the test script to verify events flow correctly:
 
-!`${CLAUDE_PLUGIN_ROOT}/skills/observability-setup/scripts/test-event.sh`
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/observability-setup/scripts/test-event.sh
+```
 
 This sends a test event through the hook and verifies it appears in Prometheus.
