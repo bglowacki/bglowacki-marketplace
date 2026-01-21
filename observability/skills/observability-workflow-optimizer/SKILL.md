@@ -22,6 +22,24 @@ You receive insights from usage-insights-agent identifying:
 - Usage patterns
 - Hook effectiveness
 
+## Project Context Filter
+
+**CRITICAL:** Only generate fixes relevant to the CURRENT PROJECT being worked on.
+
+When analyzing insights, **EXCLUDE** recommendations about:
+- Skills/agents from unrelated plugins (e.g., plugin-dev agents when working on a business app)
+- Global configuration issues unrelated to current project
+- Duplicate skills in `~/.claude/skills/` unless they affect current project
+- Patterns from sessions in other projects
+
+**INCLUDE** only:
+- Missed opportunities from sessions in the current project
+- Skills/agents that would help with the current project's domain
+- Project-level CLAUDE.md improvements
+- Hooks that would improve the current project's workflow
+
+Ask yourself: "Would this fix help someone working on THIS project specifically?"
+
 ## Fix Strategy
 
 ### Order of Preference (minimal first)
@@ -91,11 +109,15 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-collector/scripts/collec
 - Change one item without checking conflicts
 - Create hooks in global `~/.claude/settings.json` for project-specific behavior
 - Add hooks that duplicate existing skill/agent functionality
+- Recommend fixes for unrelated plugins (e.g., plugin-dev for a business app)
+- Suggest global skill/agent changes based on single-project patterns
 
 **DO:**
 - Use specific, distinctive triggers
 - Check for conflicts with similar items
-- Test with usage-analyzer after changes
+- Test with usage-collector after changes
 - Prefer description changes over structural changes
 - Create hooks in project `.claude/settings.json`
 - Use hooks for automation (formatting, validation) not for workflow guidance
+- Focus fixes on the current project's domain and needs
+- Filter out noise from cross-project analysis

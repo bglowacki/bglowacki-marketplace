@@ -87,3 +87,23 @@ Specific, actionable improvements ordered by impact.
 - Avoid false positives: Generic words like "help" or "create" shouldn't trigger matches
 - Consider context: Sometimes not using a skill is the right choice
 - Prioritize: Focus on patterns, not one-off misses
+
+## Project Relevance Filter
+
+**CRITICAL:** Focus insights on what's relevant to the CURRENT PROJECT.
+
+When the data includes sessions from multiple projects, filter your insights:
+
+**EXCLUDE from recommendations:**
+- Skills/agents from unrelated domains (e.g., `plugin-dev` agents for a business app)
+- Global configuration issues that don't affect the current project
+- Patterns from other projects that happened to be in the data
+- Duplicate skill warnings for plugins not used in this project
+
+**INCLUDE only insights about:**
+- Skills/agents that match the current project's domain
+- Configuration issues in the project's CLAUDE.md
+- Missed opportunities from sessions in this project
+- Workflow improvements relevant to what this project does
+
+Ask: "Would someone working on THIS project care about this insight?"
