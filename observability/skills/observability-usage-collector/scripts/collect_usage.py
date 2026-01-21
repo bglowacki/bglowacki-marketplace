@@ -79,6 +79,18 @@ class PrometheusData:
     error: Optional[str] = None
 
 
+@dataclass
+class SetupProfile:
+    complexity: str  # "minimal", "moderate", "complex"
+    total_components: int
+    shape: list[str]  # e.g., ["plugin-heavy", "hook-light"]
+    by_source: dict[str, dict[str, int]]  # source_type -> {skills, agents, commands, hooks}
+    red_flags: list[str]
+    coverage: dict[str, bool]
+    coverage_gaps: list[str]
+    overlapping_triggers: list[dict]  # [{trigger, items}]
+
+
 # =============================================================================
 # Prometheus Fetcher
 # =============================================================================
