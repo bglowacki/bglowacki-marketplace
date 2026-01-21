@@ -27,3 +27,11 @@ Endpoints:
 - OTEL: `http://localhost:30418`
 - Prometheus: `http://localhost:30090`
 - Grafana: `http://localhost:3000` (admin/prom-operator)
+
+## Verify Setup
+
+After deployment, run the test script to verify events flow correctly:
+
+!`${CLAUDE_PLUGIN_ROOT}/skills/observability-setup/scripts/test-event.sh`
+
+This sends a test event through the hook and verifies it appears in Prometheus.

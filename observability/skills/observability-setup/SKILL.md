@@ -27,3 +27,21 @@ The script will:
 Endpoints:
 - OTEL: `http://localhost:30418`
 - Prometheus: `http://localhost:30090`
+
+## Testing the Setup
+
+After deployment completes, run the test script to verify events flow correctly:
+
+```bash
+{base_directory}/scripts/test-event.sh
+```
+
+This script:
+1. Sends a test event through the actual hook (`send_event_otel.py`)
+2. Waits for metrics to propagate
+3. Queries Prometheus to verify the event was received
+4. Lists all available `claude_code_*` metrics
+
+Expected output should show:
+- "Found!" for the test metric query
+- List of `claude_code_*` metrics in Prometheus
