@@ -16,7 +16,7 @@ This command orchestrates the full analysis pipeline. Follow these steps IN ORDE
 Run IMMEDIATELY (do not explore or read files first):
 
 ```bash
-uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-analyzer/scripts/analyze_usage.py --format json --sessions 20 > /tmp/usage-data.json
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-collector/scripts/collect_usage.py --format json --sessions 20 > /tmp/usage-data.json
 ```
 
 ## Step 2: Interpret Data

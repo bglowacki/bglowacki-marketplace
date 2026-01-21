@@ -1,15 +1,15 @@
 ---
-name: observability-usage-analyzer
-description: Analyze Claude Code usage patterns and get AI-powered insights
+name: observability-usage-collector
+description: Collect Claude Code usage data for analysis
 allowed-tools:
   - Bash
   - Read
   - Task
 ---
 
-# Usage Analyzer
+# Usage Collector
 
-Analyze your Claude Code usage to find missed opportunities and optimization suggestions.
+Collect your Claude Code usage data for analysis by the usage-insights-agent.
 
 ## Quick Start
 
@@ -17,7 +17,7 @@ Run the full pipeline:
 
 ```bash
 # 1. Collect data
-uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-analyzer/scripts/analyze_usage.py --format json --sessions 20 > /tmp/usage-data.json
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-collector/scripts/collect_usage.py --format json --sessions 20 > /tmp/usage-data.json
 
 # 2. Interpret with agent
 ```
@@ -33,7 +33,7 @@ Then use the usage-insights-agent to interpret `/tmp/usage-data.json`.
 
 ## Pipeline
 
-1. **Data Collection** (Python) → Structured JSON
+1. **Data Collection** (this command) → Structured JSON
 2. **Interpretation** (usage-insights-agent) → Insights
 3. **Optimization** (workflow-optimizer skill) → Fixes
 
@@ -41,7 +41,7 @@ Then use the usage-insights-agent to interpret `/tmp/usage-data.json`.
 
 ```bash
 # Collect usage data
-uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-analyzer/scripts/analyze_usage.py --format json --sessions 20 --no-prometheus > /tmp/usage-data.json
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-collector/scripts/collect_usage.py --format json --sessions 20 --no-prometheus > /tmp/usage-data.json
 
 # Then ask: "Analyze the usage data in /tmp/usage-data.json and give me insights"
 # After insights: "Now help me optimize my workflow based on these insights"

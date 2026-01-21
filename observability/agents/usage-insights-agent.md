@@ -1,6 +1,6 @@
 ---
 name: usage-insights-agent
-description: Analyzes Claude Code usage data to identify patterns, missed opportunities, and configuration issues. Use after running usage-analyzer with JSON output. Triggers on "analyze usage data", "interpret usage", "what am I missing", or when usage JSON is provided.
+description: Analyzes Claude Code usage data to identify patterns, missed opportunities, and configuration issues. Use after running usage-collector with JSON output. Triggers on "analyze usage data", "interpret usage", "what am I missing", or when usage JSON is provided.
 model: opus
 tools: Read, Bash
 ---
@@ -11,7 +11,7 @@ You analyze Claude Code usage data to provide intelligent insights about skill/a
 
 ## Input
 
-You receive JSON data from `analyze_usage.py --format json` containing:
+You receive JSON data from `collect_usage.py --format json` containing:
 - **discovery**: All available skills, agents, commands, and hooks with descriptions
 - **sessions**: Recent user prompts
 - **stats**: Usage counts and potential matches

@@ -5,8 +5,9 @@ Claude Code plugin for OTEL metrics, alerts, and session analysis.
 ## Project Context
 
 This is an **observability plugin development project**. The plugin provides:
-- **usage-analyzer**: Analyzes Claude Code session history to identify missed skill/agent opportunities
-- **workflow-optimizer**: Suggests improvements to skills, agents, and workflows based on usage analysis
+- **usage-collector**: Collects Claude Code session history and metrics (data gathering only)
+- **usage-insights-agent**: Analyzes collected data to identify patterns and missed opportunities
+- **workflow-optimizer**: Suggests improvements to skills, agents, and workflows based on analysis
 
 Plugin source files are in this directory (`observability/`).
 

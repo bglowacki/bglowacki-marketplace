@@ -10,7 +10,7 @@ Generate minimal, targeted improvements based on usage insights.
 ## Prerequisites
 
 Run in this order:
-1. `uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-analyzer/scripts/analyze_usage.py --format json > /tmp/usage-data.json`
+1. `uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-collector/scripts/collect_usage.py --format json > /tmp/usage-data.json`
 2. Use usage-insights-agent to interpret the data
 3. Use this skill to generate fixes
 
@@ -78,7 +78,7 @@ For each improvement:
 
 After applying fixes, re-run the pipeline to verify:
 ```bash
-uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-analyzer/scripts/analyze_usage.py --format json > /tmp/usage-data.json
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-collector/scripts/collect_usage.py --format json > /tmp/usage-data.json
 # Then use usage-insights-agent to verify improvements
 ```
 

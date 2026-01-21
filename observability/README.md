@@ -33,7 +33,7 @@ See [skills/observability-setup/SKILL.md](skills/observability-setup/SKILL.md) f
 |-------|-------------|
 | `/observability-setup` | Deploy full observability stack to Kubernetes |
 | `/observability-uninstall` | Remove entire stack (OTEL, Prometheus, Grafana, cert-manager) |
-| `/observability-usage-analyzer` | Analyze session patterns, identify missed opportunities |
+| `/observability-usage-collector` | Collect session data and metrics for analysis |
 | `/observability-workflow-optimizer` | Suggest improvements based on usage analysis |
 
 ## Configuration
