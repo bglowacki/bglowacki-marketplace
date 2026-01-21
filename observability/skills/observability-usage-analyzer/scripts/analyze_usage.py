@@ -1340,36 +1340,36 @@ def main():
 
     project_path = args.project or str(cwd)
 
-    # Fetch Prometheus data (unless disabled)
+    print("\n[1/5] Fetching Prometheus metrics...", file=sys.stderr)
     prom_data = PrometheusData()
     if not args.no_prometheus:
         endpoint = args.prometheus_endpoint or get_prometheus_endpoint()
         if endpoint:
-            print(f"Fetching Prometheus data from {endpoint}...", file=sys.stderr)
             prom_data = fetch_prometheus_data(endpoint, args.range)
-            if prom_data.error:
-                print(f"Warning: {prom_data.error}", file=sys.stderr)
+            if prom_data.available:
+                print(f"  ✓ Connected to {endpoint}", file=sys.stderr)
+            else:
+                print(f"  ✗ Failed: {prom_data.error}", file=sys.stderr)
         else:
-            print("No Prometheus endpoint configured, using JSONL only", file=sys.stderr)
+            print("  ⊘ Skipped (no endpoint configured)", file=sys.stderr)
+    else:
+        print("  ⊘ Skipped (--no-prometheus)", file=sys.stderr)
 
-    # Discover skills, agents, and commands
+    print("\n[2/5] Discovering skills, agents, commands, hooks...", file=sys.stderr)
     skill_paths = [home / ".claude" / "skills", cwd / ".claude" / "skills"]
     agent_paths = [home / ".claude" / "agents", cwd / ".claude" / "agents"]
     command_paths = [home / ".claude" / "commands", cwd / ".claude" / "commands"]
     plugins_cache = home / ".claude" / "plugins" / "cache"
 
-    print("Discovering skills, agents, commands, and hooks...", file=sys.stderr)
     skills = discover_skills(skill_paths)
     agents = discover_agents(agent_paths)
     commands = discover_commands(command_paths)
 
-    # Discover from plugins
     plugin_skills, plugin_agents, plugin_commands = discover_from_plugins(plugins_cache)
     skills.extend(plugin_skills)
     agents.extend(plugin_agents)
     commands.extend(plugin_commands)
 
-    # Discover hooks from settings files and plugins
     settings_paths = [
         (home / ".claude" / "settings.json", "global"),
         (cwd / ".claude" / "settings.json", "project"),
@@ -1377,28 +1377,37 @@ def main():
     ]
     hooks = discover_hooks(settings_paths, plugins_cache)
 
-    print(f"Found {len(skills)} skills, {len(agents)} agents, {len(commands)} commands, {len(hooks)} hooks", file=sys.stderr)
+    print(f"  ✓ Found {len(skills)} skills, {len(agents)} agents, {len(commands)} commands, {len(hooks)} hooks", file=sys.stderr)
 
-    # Parse CLAUDE.md files
+    print("\n[3/5] Parsing CLAUDE.md files...", file=sys.stderr)
     claude_md_paths = [
         home / ".claude" / "CLAUDE.md",
         cwd / "CLAUDE.md",
         cwd / ".claude" / "instructions.md",
     ]
     claude_md = parse_claude_md_files(claude_md_paths)
+    if claude_md["files_found"]:
+        print(f"  ✓ Found {len(claude_md['files_found'])} config file(s)", file=sys.stderr)
+    else:
+        print("  ⊘ No CLAUDE.md files found", file=sys.stderr)
 
-    # Find and parse sessions
+    print("\n[4/5] Parsing session files...", file=sys.stderr)
     projects_dir = home / ".claude" / "projects"
     session_files = find_project_sessions(projects_dir, project_path, args.sessions)
 
-    print(f"Parsing {len(session_files)} sessions...", file=sys.stderr)
-    sessions = [parse_session_file(f) for f in session_files]
+    if session_files:
+        sessions = [parse_session_file(f) for f in session_files]
+        total_prompts = sum(len(s.prompts) for s in sessions)
+        print(f"  ✓ Parsed {len(sessions)} sessions ({total_prompts} prompts)", file=sys.stderr)
+    else:
+        sessions = []
+        print(f"  ✗ No sessions found for {project_path}", file=sys.stderr)
 
-    # Analyze JSONL
+    print("\n[5/5] Analyzing usage patterns...", file=sys.stderr)
     missed, jsonl_stats = analyze_jsonl(skills, agents, commands, sessions)
-
-    # Correlate data
     insights = correlate_data(prom_data, jsonl_stats, missed)
+    print(f"  ✓ Found {len(missed)} missed opportunities, {len(insights)} insights", file=sys.stderr)
+    print("", file=sys.stderr)
 
     # Output
     if args.format == "json":
