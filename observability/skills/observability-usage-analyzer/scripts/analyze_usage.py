@@ -38,12 +38,23 @@ class SkillOrAgent:
 
 
 @dataclass
+class Hook:
+    event_type: str  # PreToolUse, PostToolUse, Stop, etc.
+    matcher: str  # Tool matcher pattern (e.g., "Bash", "*")
+    command: str  # The command/script to run
+    source_path: str
+    source_type: str  # "global", "project", "project-local", or "plugin:<name>"
+    timeout: Optional[int] = None
+
+
+@dataclass
 class SessionData:
     session_id: str
     prompts: list[str] = field(default_factory=list)
     skills_used: set[str] = field(default_factory=set)
     agents_used: set[str] = field(default_factory=set)
     tools_used: set[str] = field(default_factory=set)
+    hooks_triggered: dict[str, int] = field(default_factory=lambda: defaultdict(int))
 
 
 @dataclass
@@ -453,6 +464,110 @@ def discover_from_plugins(plugins_cache: Path) -> tuple[list[SkillOrAgent], list
     return skills, agents, commands
 
 
+def discover_hooks(settings_paths: list[tuple[Path, str]], plugins_cache: Path) -> list[Hook]:
+    """Discover hooks from settings files and plugins.
+
+    Args:
+        settings_paths: List of (path, source_type) tuples
+        plugins_cache: Path to plugins cache directory
+    """
+    hooks = []
+
+    # Discover from settings files
+    for settings_path, source_type in settings_paths:
+        if not settings_path.exists():
+            continue
+
+        try:
+            settings = json.loads(settings_path.read_text())
+            hooks_config = settings.get("hooks", {})
+
+            for event_type, matchers in hooks_config.items():
+                if isinstance(matchers, dict):
+                    # Format: {"Bash": "command"} or {"Bash": [...]}
+                    for matcher, hook_def in matchers.items():
+                        if isinstance(hook_def, str):
+                            hooks.append(Hook(
+                                event_type=event_type,
+                                matcher=matcher,
+                                command=hook_def,
+                                source_path=str(settings_path),
+                                source_type=source_type,
+                            ))
+                        elif isinstance(hook_def, list):
+                            for h in hook_def:
+                                if isinstance(h, dict):
+                                    hooks.append(Hook(
+                                        event_type=event_type,
+                                        matcher=matcher,
+                                        command=h.get("command", ""),
+                                        source_path=str(settings_path),
+                                        source_type=source_type,
+                                        timeout=h.get("timeout"),
+                                    ))
+                elif isinstance(matchers, list):
+                    # Format: [{"matcher": "Bash", "hooks": [...]}]
+                    for matcher_group in matchers:
+                        matcher = matcher_group.get("matcher", "*")
+                        for h in matcher_group.get("hooks", []):
+                            if isinstance(h, dict):
+                                hooks.append(Hook(
+                                    event_type=event_type,
+                                    matcher=matcher,
+                                    command=h.get("command", ""),
+                                    source_path=str(settings_path),
+                                    source_type=source_type,
+                                    timeout=h.get("timeout"),
+                                ))
+        except (json.JSONDecodeError, Exception) as e:
+            print(f"Warning: Could not parse hooks from {settings_path}: {e}", file=sys.stderr)
+
+    # Discover from plugins
+    if plugins_cache.exists():
+        for marketplace_dir in plugins_cache.iterdir():
+            if not marketplace_dir.is_dir() or marketplace_dir.name.startswith("temp_"):
+                continue
+
+            for plugin_dir in marketplace_dir.iterdir():
+                if not plugin_dir.is_dir():
+                    continue
+
+                version_dirs = [d for d in plugin_dir.iterdir() if d.is_dir() and not d.name.startswith(".")]
+                if not version_dirs:
+                    continue
+
+                latest_version = max(version_dirs, key=lambda d: d.stat().st_mtime)
+                plugin_json = latest_version / ".claude-plugin" / "plugin.json"
+
+                if not plugin_json.exists():
+                    plugin_json = latest_version / "plugin.json"
+
+                if plugin_json.exists():
+                    try:
+                        plugin_config = json.loads(plugin_json.read_text())
+                        plugin_name = plugin_config.get("name", plugin_dir.name)
+                        hooks_config = plugin_config.get("hooks", {})
+
+                        for event_type, matchers in hooks_config.items():
+                            if isinstance(matchers, list):
+                                for matcher_group in matchers:
+                                    matcher = matcher_group.get("matcher", "*")
+                                    for h in matcher_group.get("hooks", []):
+                                        if isinstance(h, dict):
+                                            hooks.append(Hook(
+                                                event_type=event_type,
+                                                matcher=matcher,
+                                                command=h.get("command", ""),
+                                                source_path=str(plugin_json),
+                                                source_type=f"plugin:{plugin_name}",
+                                                timeout=h.get("timeout"),
+                                            ))
+                    except (json.JSONDecodeError, Exception) as e:
+                        print(f"Warning: Could not parse hooks from {plugin_json}: {e}", file=sys.stderr)
+
+    return hooks
+
+
 def parse_claude_md_files(paths: list[Path]) -> dict:
     """Parse CLAUDE.md files and return structured data."""
     result = {
@@ -484,6 +599,7 @@ def generate_analysis_json(
     skills: list[SkillOrAgent],
     agents: list[SkillOrAgent],
     commands: list[SkillOrAgent],
+    hooks: list[Hook],
     sessions: list[SessionData],
     jsonl_stats: dict,
     claude_md: dict,
@@ -494,9 +610,9 @@ def generate_analysis_json(
     return {
         "_schema": {
             "description": "Claude Code usage analysis data for agent interpretation",
-            "version": "2.0",
+            "version": "2.1",
             "sections": {
-                "discovery": "All available skills, agents, and commands discovered from global, project, and plugin sources",
+                "discovery": "All available skills, agents, commands, and hooks discovered from global, project, and plugin sources",
                 "sessions": "Parsed session data showing what was actually used",
                 "stats": "Aggregated statistics on usage and missed opportunities",
                 "claude_md": "Content and structure of CLAUDE.md configuration files",
@@ -532,10 +648,20 @@ def generate_analysis_json(
                 }
                 for c in commands
             ],
+            "hooks": [
+                {
+                    "event_type": h.event_type,
+                    "matcher": h.matcher,
+                    "command": h.command[:100],
+                    "source": h.source_type,
+                }
+                for h in hooks
+            ],
             "totals": {
                 "skills": len(skills),
                 "agents": len(agents),
                 "commands": len(commands),
+                "hooks": len(hooks),
             },
         },
 
@@ -1232,7 +1358,7 @@ def main():
     command_paths = [home / ".claude" / "commands", cwd / ".claude" / "commands"]
     plugins_cache = home / ".claude" / "plugins" / "cache"
 
-    print("Discovering skills, agents, and commands...", file=sys.stderr)
+    print("Discovering skills, agents, commands, and hooks...", file=sys.stderr)
     skills = discover_skills(skill_paths)
     agents = discover_agents(agent_paths)
     commands = discover_commands(command_paths)
@@ -1243,7 +1369,15 @@ def main():
     agents.extend(plugin_agents)
     commands.extend(plugin_commands)
 
-    print(f"Found {len(skills)} skills, {len(agents)} agents, {len(commands)} commands", file=sys.stderr)
+    # Discover hooks from settings files and plugins
+    settings_paths = [
+        (home / ".claude" / "settings.json", "global"),
+        (cwd / ".claude" / "settings.json", "project"),
+        (cwd / ".claude" / "settings.local.json", "project-local"),
+    ]
+    hooks = discover_hooks(settings_paths, plugins_cache)
+
+    print(f"Found {len(skills)} skills, {len(agents)} agents, {len(commands)} commands, {len(hooks)} hooks", file=sys.stderr)
 
     # Parse CLAUDE.md files
     claude_md_paths = [
@@ -1269,7 +1403,7 @@ def main():
     # Output
     if args.format == "json":
         output = generate_analysis_json(
-            skills, agents, commands, sessions, jsonl_stats, claude_md, prom_data
+            skills, agents, commands, hooks, sessions, jsonl_stats, claude_md, prom_data
         )
         print(json.dumps(output, indent=2))
     elif args.format == "dashboard":
