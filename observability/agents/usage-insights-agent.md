@@ -2,9 +2,7 @@
 name: usage-insights-agent
 description: Analyzes Claude Code usage data to identify patterns, missed opportunities, and configuration issues. Use after running usage-analyzer with JSON output. Triggers on "analyze usage data", "interpret usage", "what am I missing", or when usage JSON is provided.
 model: sonnet
-tools:
-  - Read
-  - Bash
+tools: Read, Bash
 ---
 
 # Usage Insights Agent
