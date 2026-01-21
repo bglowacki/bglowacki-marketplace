@@ -15,7 +15,8 @@ Tracks:
 - Skill invocations (tool_name == "Skill")
 - Subagent invocations (tool_name == "Task")
 - Tool usage by type
-- Outcomes (success/failure)
+- Outcomes (success/failure/interrupted)
+- Interrupted tools (PreToolUse without PostToolUse)
 - Workflow stages
 - Context compactions
 """
@@ -130,6 +131,18 @@ tools_per_compaction = meter.create_histogram(
     unit="1"
 )
 
+tool_interrupted = meter.create_counter(
+    "claude_code.tool.interrupted",
+    description="Tool calls interrupted by user (ESC) or failed before completion",
+    unit="1"
+)
+
+tool_started = meter.create_counter(
+    "claude_code.tool.started",
+    description="Tool calls started (PreToolUse)",
+    unit="1"
+)
+
 
 def flush_metrics():
     global _connection_warned
@@ -184,7 +197,9 @@ def get_session_state(session_id: str) -> dict:
         "stages_visited": [],
         "success_count": 0,
         "failure_count": 0,
+        "interrupted_count": 0,
         "compaction_count": 0,
+        "pending_tools": {},  # tool_use_id -> tool_name
     }
 
 
@@ -233,6 +248,7 @@ def generate_and_save_summary(session_id: str, state: dict, project: str):
         "outcomes": {
             "success": state.get("success_count", 0),
             "failure": state.get("failure_count", 0),
+            "interrupted": state.get("interrupted_count", 0),
         },
         "compactions": state.get("compaction_count", 0),
     }
@@ -243,9 +259,10 @@ def generate_and_save_summary(session_id: str, state: dict, project: str):
 
     success = summary["outcomes"]["success"]
     failure = summary["outcomes"]["failure"]
+    interrupted = summary["outcomes"]["interrupted"]
     notify_macos(
         f"Session Complete: {project}",
-        f"Tools: {summary['total_tools']} | ✓{success} ✗{failure} | Stages: {len(summary['stages_visited'])}"
+        f"Tools: {summary['total_tools']} | ✓{success} ✗{failure} ⏹{interrupted} | Stages: {len(summary['stages_visited'])}"
     )
 
     return summary
@@ -369,8 +386,29 @@ def main():
         "project": project,
     }
 
-    if args.event_type == "PostToolUse":
+    if args.event_type == "PreToolUse":
         state = get_session_state(session_id)
+        tool_use_id = input_data.get("tool_use_id", "")
+
+        # Track this tool as pending (started but not yet completed)
+        if tool_use_id:
+            pending = state.get("pending_tools", {})
+            pending[tool_use_id] = tool_name
+            state["pending_tools"] = pending
+
+        tool_started.add(1, {**base_attributes, "tool_name": tool_name})
+        save_session_state(session_id, state)
+
+    elif args.event_type == "PostToolUse":
+        state = get_session_state(session_id)
+        tool_use_id = input_data.get("tool_use_id", "")
+
+        # Remove from pending (tool completed successfully)
+        if tool_use_id:
+            pending = state.get("pending_tools", {})
+            pending.pop(tool_use_id, None)
+            state["pending_tools"] = pending
+
         outcome, failure_reason = detect_outcome(tool_name, input_data)
 
         if outcome == "success":
@@ -452,6 +490,18 @@ def main():
 
     elif args.event_type in ("Stop", "SessionStop"):
         state = get_session_state(session_id)
+
+        # Count pending tools as interrupted (PreToolUse fired but PostToolUse never came)
+        pending = state.get("pending_tools", {})
+        if pending:
+            for tool_use_id, pending_tool_name in pending.items():
+                tool_interrupted.add(1, {
+                    **base_attributes,
+                    "tool_name": pending_tool_name,
+                    "tool_use_id": tool_use_id[:8] if tool_use_id else "unknown",
+                })
+                state["interrupted_count"] = state.get("interrupted_count", 0) + 1
+            state["pending_tools"] = {}
 
         if state.get("tool_sequence") or state.get("success_count", 0) > 0:
             generate_and_save_summary(session_id, state, project)
