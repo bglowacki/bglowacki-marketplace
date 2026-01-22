@@ -91,6 +91,115 @@ class SetupProfile:
     overlapping_triggers: list[dict]  # [{trigger, items}]
 
 
+def compute_setup_profile(
+    skills: list[SkillOrAgent],
+    agents: list[SkillOrAgent],
+    commands: list[SkillOrAgent],
+    hooks: list[Hook],
+    claude_md: dict,
+) -> SetupProfile:
+    """Compute setup profile for context-first analysis."""
+
+    # Count by source
+    by_source: dict[str, dict[str, int]] = defaultdict(lambda: {"skills": 0, "agents": 0, "commands": 0, "hooks": 0})
+    for s in skills:
+        by_source[s.source_type]["skills"] += 1
+    for a in agents:
+        by_source[a.source_type]["agents"] += 1
+    for c in commands:
+        by_source[c.source_type]["commands"] += 1
+    for h in hooks:
+        by_source[h.source_type]["hooks"] += 1
+
+    # Complexity classification
+    total = len(skills) + len(agents) + len(commands) + len(hooks)
+    if total < 10:
+        complexity = "minimal"
+    elif total < 50:
+        complexity = "moderate"
+    else:
+        complexity = "complex"
+
+    # Shape analysis
+    shape = []
+    total_skills_agents = len(skills) + len(agents)
+    plugin_count = sum(
+        v["skills"] + v["agents"]
+        for k, v in by_source.items()
+        if k.startswith("plugin:")
+    )
+    if total_skills_agents > 0 and (plugin_count / total_skills_agents) > 0.7:
+        shape.append("plugin-heavy")
+    if len(hooks) < 3:
+        shape.append("hook-light")
+    if by_source["project"]["skills"] == 0 and by_source["project"]["agents"] == 0:
+        if not any(f for f in claude_md.get("files_found", []) if "CLAUDE.md" in f and ".claude" not in f):
+            shape.append("no-project-customization")
+    if by_source["global"]["skills"] + by_source["global"]["agents"] > 0 and by_source["project"]["skills"] + by_source["project"]["agents"] == 0:
+        shape.append("global-heavy")
+
+    # Red flags
+    red_flags = []
+    project_claude_md = [f for f in claude_md.get("files_found", []) if "CLAUDE.md" in f and ".claude" not in f and str(Path.home()) not in f]
+    if not project_claude_md:
+        red_flags.append("No project-level CLAUDE.md")
+    if by_source["project"]["hooks"] == 0 and by_source.get("project-local", {}).get("hooks", 0) == 0:
+        red_flags.append("No project-level hooks")
+    if by_source["project"]["skills"] == 0:
+        red_flags.append("No project-level skills")
+
+    # Check for empty descriptions
+    empty_desc_count = sum(1 for s in skills + agents if not s.description.strip())
+    if empty_desc_count > 0:
+        red_flags.append(f"{empty_desc_count} components with empty descriptions")
+
+    # Find overlapping triggers
+    trigger_map: dict[str, list[str]] = defaultdict(list)
+    for item in skills + agents:
+        for trigger in item.triggers:
+            trigger_lower = trigger.lower()
+            if len(trigger_lower) > 4:  # Skip short triggers
+                trigger_map[trigger_lower].append(f"{item.type}:{item.name}")
+
+    overlapping = []
+    for trigger, items in trigger_map.items():
+        if len(items) > 1:
+            overlapping.append({"trigger": trigger, "items": items})
+
+    if overlapping:
+        red_flags.append(f"{len(overlapping)} triggers overlap across multiple components")
+
+    # Coverage assessment
+    all_items = skills + agents
+    all_names_desc = " ".join(
+        f"{i.name.lower()} {i.description.lower()}" for i in all_items
+    )
+
+    coverage = {
+        "git_commit": any(kw in all_names_desc for kw in ["commit", "pre-commit"]),
+        "code_review": any(kw in all_names_desc for kw in ["review", "pr review"]),
+        "testing": any(kw in all_names_desc for kw in ["test", "tdd", "spec"]),
+        "debugging": any(kw in all_names_desc for kw in ["debug", "troubleshoot"]),
+        "planning": any(kw in all_names_desc for kw in ["plan", "design", "architect"]),
+        "event_sourcing": any(kw in all_names_desc for kw in ["aggregate", "event sourc", "projection", "cqrs"]),
+        "documentation": any(kw in all_names_desc for kw in ["documentation", "readme", "guide"]),
+        "security": any(kw in all_names_desc for kw in ["vulnerab", "secret", "security"]),
+    }
+
+    coverage_gaps = [k for k, v in coverage.items() if not v]
+
+    return SetupProfile(
+        complexity=complexity,
+        total_components=total,
+        shape=shape,
+        by_source=dict(by_source),
+        red_flags=red_flags,
+        coverage=coverage,
+        coverage_gaps=coverage_gaps,
+        overlapping_triggers=overlapping[:10],  # Limit to top 10
+    )
+
+
 # =============================================================================
 # Prometheus Fetcher
 # =============================================================================
