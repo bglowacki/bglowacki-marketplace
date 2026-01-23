@@ -441,13 +441,12 @@ def extract_triggers_from_description(description: str) -> list[str]:
 def discover_skills(paths: list[Path]) -> list[SkillOrAgent]:
     """Discover skills from given paths."""
     skills = []
-    home_str = str(Path.home())
-
+    global_claude_dir = str(Path.home() / ".claude")
     for base_path in paths:
         if not base_path.exists():
             continue
 
-        source_type = "global" if home_str in str(base_path) else "project"
+        source_type = "global" if str(base_path).startswith(global_claude_dir) else "project"
 
         for skill_dir in base_path.iterdir():
             if not skill_dir.is_dir():
@@ -483,13 +482,12 @@ def discover_skills(paths: list[Path]) -> list[SkillOrAgent]:
 def discover_agents(paths: list[Path]) -> list[SkillOrAgent]:
     """Discover agents from given paths."""
     agents = []
-    home_str = str(Path.home())
-
+    global_claude_dir = str(Path.home() / ".claude")
     for base_path in paths:
         if not base_path.exists():
             continue
 
-        source_type = "global" if home_str in str(base_path) else "project"
+        source_type = "global" if str(base_path).startswith(global_claude_dir) else "project"
 
         for agent_file in base_path.glob("*.md"):
             try:
@@ -529,13 +527,13 @@ def discover_agents(paths: list[Path]) -> list[SkillOrAgent]:
 def discover_commands(paths: list[Path]) -> list[SkillOrAgent]:
     """Discover commands from given paths."""
     commands = []
-    home_str = str(Path.home())
+    global_claude_dir = str(Path.home() / ".claude")
 
     for base_path in paths:
         if not base_path.exists():
             continue
 
-        source_type = "global" if home_str in str(base_path) else "project"
+        source_type = "global" if str(base_path).startswith(global_claude_dir) else "project"
 
         for cmd_file in base_path.glob("*.md"):
             try:
@@ -1379,6 +1377,24 @@ def main():
         return
 
     project_path = args.project or str(cwd)
+    projects_dir = home / ".claude" / "projects"
+
+    # Resolve project path early to get actual source directory
+    # When using --project widget-service, resolve to /Users/.../widget-service
+    if args.project and not Path(args.project).is_absolute():
+        # Fuzzy match: find the session folder, then derive source path
+        resolved_dir, matches = resolve_project_path(projects_dir, project_path)
+        if resolved_dir:
+            # Convert session folder name back to source path
+            # e.g., "-Users-bartoszglowacki-Projects-widget-service" -> "/Users/bartoszglowacki/Projects/widget-service"
+            target_project_dir = Path("/" + resolved_dir.name.replace("-", "/"))
+            if not target_project_dir.exists():
+                # Fallback: try common patterns
+                target_project_dir = home / "Projects" / project_path
+        else:
+            target_project_dir = cwd
+    else:
+        target_project_dir = Path(project_path) if project_path != str(cwd) else cwd
 
     print("\n[1/5] Fetching Prometheus metrics...", file=sys.stderr)
     prom_data = PrometheusData()
@@ -1396,9 +1412,9 @@ def main():
         print("  ⊘ Skipped (--no-prometheus)", file=sys.stderr)
 
     print("\n[2/5] Discovering skills, agents, commands, hooks...", file=sys.stderr)
-    skill_paths = [home / ".claude" / "skills", cwd / ".claude" / "skills"]
-    agent_paths = [home / ".claude" / "agents", cwd / ".claude" / "agents"]
-    command_paths = [home / ".claude" / "commands", cwd / ".claude" / "commands"]
+    skill_paths = [home / ".claude" / "skills", target_project_dir / ".claude" / "skills"]
+    agent_paths = [home / ".claude" / "agents", target_project_dir / ".claude" / "agents"]
+    command_paths = [home / ".claude" / "commands", target_project_dir / ".claude" / "commands"]
     plugins_cache = home / ".claude" / "plugins" / "cache"
 
     skills = discover_skills(skill_paths)
@@ -1412,16 +1428,14 @@ def main():
 
     settings_paths = [
         (home / ".claude" / "settings.json", "global"),
-        (cwd / ".claude" / "settings.json", "project"),
-        (cwd / ".claude" / "settings.local.json", "project-local"),
+        (target_project_dir / ".claude" / "settings.json", "project"),
+        (target_project_dir / ".claude" / "settings.local.json", "project-local"),
     ]
     hooks = discover_hooks(settings_paths, plugins_cache)
 
     print(f"  ✓ Found {len(skills)} skills, {len(agents)} agents, {len(commands)} commands, {len(hooks)} hooks", file=sys.stderr)
 
     print("\n[3/5] Parsing CLAUDE.md files...", file=sys.stderr)
-    # Use target project path if specified, otherwise current directory
-    target_project_dir = Path(project_path) if project_path != str(cwd) else cwd
     claude_md_paths = [
         home / ".claude" / "CLAUDE.md",
         target_project_dir / "CLAUDE.md",
@@ -1437,10 +1451,14 @@ def main():
     print(f"  ✓ Setup: {setup_profile.complexity} complexity, {len(setup_profile.red_flags)} red flags", file=sys.stderr)
 
     print("\n[4/5] Parsing session files...", file=sys.stderr)
-    projects_dir = home / ".claude" / "projects"
 
-    # Resolve project path (supports fuzzy matching like "widget-service")
-    resolved_dir, matches = resolve_project_path(projects_dir, project_path)
+    # Resolve project path for sessions (reuse projects_dir from earlier)
+    # For fuzzy matches, we already resolved earlier; for full paths, resolve now
+    if args.project and not Path(args.project).is_absolute():
+        # Already resolved earlier - reuse
+        resolved_dir, matches = resolve_project_path(projects_dir, project_path)
+    else:
+        resolved_dir, matches = resolve_project_path(projects_dir, project_path)
 
     if resolved_dir:
         if resolved_dir.name != project_path.replace("/", "-"):
