@@ -39,7 +39,42 @@ Group all findings into these 5 categories:
 
 ## Analysis Workflow
 
-### Phase 1: Setup Understanding (ALWAYS DO FIRST)
+### Phase 0: Plugin Efficiency (ALWAYS DO FIRST)
+
+Check `setup_profile.plugin_usage` and output:
+
+```markdown
+## Plugin Efficiency
+
+**Active plugins ({count}):** {active plugins joined by ", "}
+Used in your sessions - keep these.
+
+**Potential plugins ({count}):** {potential plugins joined by ", "}
+Matched your prompts but never triggered. Consider using or improving triggers.
+
+**Unused plugins ({count}):** {unused plugins joined by ", "}
+Taking up context with no benefit for this project.
+
+**Recommendation:** Disable unused plugins to reduce context overhead.
+```
+
+If there are 5+ unused plugins, add:
+```markdown
+To disable for this project only, add to `.claude/settings.json`:
+{"disabled_plugins": ["plugin-name", ...]}
+```
+
+### Relevance Filter
+
+**CRITICAL:** Only analyze components from:
+- Global config (always relevant)
+- Project config (always relevant)
+- Active plugins (used in sessions)
+- Potential plugins (matched prompts)
+
+**SKIP all findings for unused plugins.** They are not relevant to this project.
+
+### Phase 1: Setup Understanding
 
 Before ANY usage analysis, present the setup summary. Start your response with:
 
@@ -218,20 +253,19 @@ Claude picks one arbitrarily, which may not be the best choice.
 
 ## Project Relevance Filter
 
-**CRITICAL:** Focus insights on what's relevant to the CURRENT PROJECT.
+**Use `setup_profile.plugin_usage` to filter:**
 
-When the data includes sessions from multiple projects, filter your insights:
+| Plugin Status | Include in Analysis? |
+|---------------|---------------------|
+| active | Yes - user is using this |
+| potential | Yes - user could benefit |
+| unused | **NO** - skip entirely |
+| global | Yes - always relevant |
+| project | Yes - always relevant |
 
-**EXCLUDE from recommendations:**
-- Skills/agents from unrelated domains (e.g., `plugin-dev` agents for a business app)
-- Global configuration issues that don't affect the current project
-- Patterns from other projects that happened to be in the data
-- Duplicate skill warnings for plugins not used in this project
+**Before outputting any finding, check:**
+1. What's the source of this component?
+2. If it's from a plugin, is that plugin active or potential?
+3. If unused → don't mention it at all
 
-**INCLUDE only insights about:**
-- Skills/agents that match the current project's domain
-- Configuration issues in the project's CLAUDE.md
-- Missed opportunities from sessions in this project
-- Workflow improvements relevant to what this project does
-
-Ask: "Would someone working on THIS project care about this insight?"
+This ensures plugin-dev issues don't appear for widget-service, etc.

@@ -89,6 +89,7 @@ class SetupProfile:
     coverage: dict[str, bool]
     coverage_gaps: list[str]
     overlapping_triggers: list[dict]  # [{trigger, items}]
+    plugin_usage: dict[str, list[str]]  # {"active": [...], "potential": [...], "unused": [...]}
 
 
 def compute_setup_profile(
@@ -197,7 +198,71 @@ def compute_setup_profile(
         coverage=coverage,
         coverage_gaps=coverage_gaps,
         overlapping_triggers=overlapping[:10],  # Limit to top 10
+        plugin_usage={"active": [], "potential": [], "unused": []},  # Computed later
     )
+
+
+def compute_plugin_usage(
+    skills: list[SkillOrAgent],
+    agents: list[SkillOrAgent],
+    sessions: list,  # list[SessionData]
+    potential_matches: list,  # list[MissedOpportunity]
+) -> dict[str, list[str]]:
+    """Compute plugin usage: active, potential, or unused.
+
+    - active: Plugin was used in sessions (skill/agent triggered)
+    - potential: Plugin matched prompts but wasn't triggered
+    - unused: Plugin has no activity at all
+    """
+    # Get all plugins from discovery
+    all_plugins: set[str] = set()
+    plugin_to_components: dict[str, list[str]] = defaultdict(list)
+
+    for item in skills + agents:
+        source = item.source_type
+        if source.startswith("plugin:"):
+            plugin_name = source.replace("plugin:", "")
+            all_plugins.add(plugin_name)
+            plugin_to_components[plugin_name].append(item.name)
+
+    # Check which plugins were used in sessions
+    active: set[str] = set()
+    used_skills = set()
+    used_agents = set()
+
+    for session in sessions:
+        used_skills.update(session.skills_used)
+        used_agents.update(session.agents_used)
+
+    for plugin, components in plugin_to_components.items():
+        for comp in components:
+            # Check if component was used (handle namespaced names like "plugin:name")
+            if comp in used_skills or comp in used_agents:
+                active.add(plugin)
+                break
+            # Also check for plugin-prefixed names
+            prefixed = f"{plugin}:{comp}"
+            if prefixed in used_skills or prefixed in used_agents:
+                active.add(plugin)
+                break
+
+    # Check which plugins had potential matches
+    potential: set[str] = set()
+    for match in potential_matches:
+        source = match.matched_item.source_type
+        if source.startswith("plugin:"):
+            plugin_name = source.replace("plugin:", "")
+            if plugin_name not in active:
+                potential.add(plugin_name)
+
+    # Rest are unused
+    unused = all_plugins - active - potential
+
+    return {
+        "active": sorted(active),
+        "potential": sorted(potential),
+        "unused": sorted(unused),
+    }
 
 
 # =============================================================================
@@ -835,6 +900,7 @@ def generate_analysis_json(
             "coverage": setup_profile.coverage,
             "coverage_gaps": setup_profile.coverage_gaps,
             "overlapping_triggers": setup_profile.overlapping_triggers,
+            "plugin_usage": setup_profile.plugin_usage,
         },
     }
 
@@ -1411,6 +1477,13 @@ def main():
     print("\n[5/5] Finding potential matches...", file=sys.stderr)
     missed, jsonl_stats = analyze_jsonl(skills, agents, commands, sessions)
     print(f"  ✓ Found {len(missed)} potential matches", file=sys.stderr)
+
+    # Compute plugin usage after we have session data and matches
+    setup_profile.plugin_usage = compute_plugin_usage(skills, agents, sessions, missed)
+    active_count = len(setup_profile.plugin_usage["active"])
+    unused_count = len(setup_profile.plugin_usage["unused"])
+    if unused_count > 0:
+        print(f"  → {unused_count} plugins unused, {active_count} active", file=sys.stderr)
     print("", file=sys.stderr)
 
     # Output
