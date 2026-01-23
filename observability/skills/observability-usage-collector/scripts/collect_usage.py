@@ -850,11 +850,35 @@ def _is_system_prompt(content: str) -> bool:
     return False
 
 
-def find_project_sessions(projects_dir: Path, project_path: str, max_sessions: int) -> list[Path]:
-    """Find session files for a project."""
+def resolve_project_path(projects_dir: Path, project_path: str) -> tuple[Path | None, list[Path]]:
+    """Resolve project path to actual folder, with fuzzy matching.
+
+    Returns (resolved_path, matches) where:
+    - resolved_path is the single matching folder or None
+    - matches is list of all matching folders (for error reporting)
+    """
+    # Try exact match first (full path like /Users/foo/project)
     project_folder = project_path.replace("/", "-")
     project_dir = projects_dir / project_folder
+    if project_dir.exists():
+        return project_dir, [project_dir]
 
+    # Try fuzzy match: find folders ending with the project name
+    if not projects_dir.exists():
+        return None, []
+
+    matches = [
+        d for d in projects_dir.iterdir()
+        if d.is_dir() and d.name.endswith(f"-{project_path}")
+    ]
+
+    if len(matches) == 1:
+        return matches[0], matches
+    return None, matches
+
+
+def find_project_sessions(projects_dir: Path, project_dir: Path, max_sessions: int) -> list[Path]:
+    """Find session files for a project."""
     if not project_dir.exists():
         return []
 
@@ -1345,7 +1369,35 @@ def main():
 
     print("\n[4/5] Parsing session files...", file=sys.stderr)
     projects_dir = home / ".claude" / "projects"
-    session_files = find_project_sessions(projects_dir, project_path, args.sessions)
+
+    # Resolve project path (supports fuzzy matching like "widget-service")
+    resolved_dir, matches = resolve_project_path(projects_dir, project_path)
+
+    if resolved_dir:
+        if resolved_dir.name != project_path.replace("/", "-"):
+            # Fuzzy match found - show which project we're using
+            print(f"  → Matched: {resolved_dir.name}", file=sys.stderr)
+        session_files = find_project_sessions(projects_dir, resolved_dir, args.sessions)
+    elif len(matches) > 1:
+        # Multiple fuzzy matches - ask user to be more specific
+        print(f"  ✗ Multiple projects match '{project_path}':", file=sys.stderr)
+        for m in matches[:5]:
+            print(f"    - {m.name}", file=sys.stderr)
+        if len(matches) > 5:
+            print(f"    ... and {len(matches) - 5} more", file=sys.stderr)
+        print("  Use full path or more specific name", file=sys.stderr)
+        session_files = []
+    else:
+        # No matches at all
+        print(f"  ✗ No project found matching '{project_path}'", file=sys.stderr)
+        # List available projects as hint
+        if projects_dir.exists():
+            available = sorted([d.name for d in projects_dir.iterdir() if d.is_dir()])[:5]
+            if available:
+                print("  Available projects:", file=sys.stderr)
+                for p in available:
+                    print(f"    - {p}", file=sys.stderr)
+        session_files = []
 
     if session_files:
         sessions = [parse_session_file(f) for f in session_files]
@@ -1353,7 +1405,8 @@ def main():
         print(f"  ✓ Parsed {len(sessions)} sessions ({total_prompts} prompts)", file=sys.stderr)
     else:
         sessions = []
-        print(f"  ✗ No sessions found for {project_path}", file=sys.stderr)
+        if resolved_dir:
+            print(f"  ✗ No sessions found in {resolved_dir.name}", file=sys.stderr)
 
     print("\n[5/5] Finding potential matches...", file=sys.stderr)
     missed, jsonl_stats = analyze_jsonl(skills, agents, commands, sessions)
