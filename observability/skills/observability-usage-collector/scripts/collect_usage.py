@@ -726,6 +726,7 @@ def generate_analysis_json(
     jsonl_stats: dict,
     claude_md: dict,
     prom_data: PrometheusData,
+    setup_profile: SetupProfile,
 ) -> dict:
     """Generate rich JSON output for agent interpretation."""
 
@@ -739,6 +740,7 @@ def generate_analysis_json(
                 "stats": "Aggregated statistics on usage and missed opportunities",
                 "claude_md": "Content and structure of CLAUDE.md configuration files",
                 "prometheus": "Metrics from Prometheus if available (trends, success rates)",
+                "setup_profile": "Computed setup profile with complexity, shape, red flags, and coverage gaps",
             },
         },
 
@@ -823,6 +825,17 @@ def generate_analysis_json(
             "workflow_stages": prom_data.workflow_stages,
             "success_rate": prom_data.overall_success_rate,
         } if prom_data.available else {"available": False},
+
+        "setup_profile": {
+            "complexity": setup_profile.complexity,
+            "total_components": setup_profile.total_components,
+            "shape": setup_profile.shape,
+            "by_source": setup_profile.by_source,
+            "red_flags": setup_profile.red_flags,
+            "coverage": setup_profile.coverage,
+            "coverage_gaps": setup_profile.coverage_gaps,
+            "overlapping_triggers": setup_profile.overlapping_triggers,
+        },
     }
 
 
