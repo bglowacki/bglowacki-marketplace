@@ -1340,6 +1340,9 @@ def main():
     else:
         print("  ⊘ No CLAUDE.md files found", file=sys.stderr)
 
+    setup_profile = compute_setup_profile(skills, agents, commands, hooks, claude_md)
+    print(f"  ✓ Setup: {setup_profile.complexity} complexity, {len(setup_profile.red_flags)} red flags", file=sys.stderr)
+
     print("\n[4/5] Parsing session files...", file=sys.stderr)
     projects_dir = home / ".claude" / "projects"
     session_files = find_project_sessions(projects_dir, project_path, args.sessions)
@@ -1360,7 +1363,7 @@ def main():
     # Output
     if args.format == "json":
         output = generate_analysis_json(
-            skills, agents, commands, hooks, sessions, jsonl_stats, claude_md, prom_data
+            skills, agents, commands, hooks, sessions, jsonl_stats, claude_md, prom_data, setup_profile
         )
         print(json.dumps(output, indent=2))
     elif args.format == "dashboard":
