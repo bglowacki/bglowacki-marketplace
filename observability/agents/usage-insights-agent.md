@@ -84,36 +84,36 @@ Count issues per category and calculate priority.
 
 **If setup_profile.complexity is "complex" (50+ components):**
 
-Present the category summary:
+Present the category summary, then **IMMEDIATELY invoke the AskUserQuestion tool**.
 
+**CRITICAL: You MUST actually call the AskUserQuestion tool - do NOT just write text asking the question.**
+
+1. First, output the summary:
 ```
 ## Improvement Categories
 
 1. **Skill Discovery** (8 issues, High) - 5 missed opportunities, 3 trigger overlaps
 2. **Agent Delegation** (3 issues, Medium) - 2 underused agents, 1 overlap
-3. **Hook Automation** (5 issues, High) - No project hooks, 3 automation gaps
-4. **Configuration** (2 issues, Low) - Missing project CLAUDE.md
-5. **Cleanup** (12 issues, Medium) - 8 never-used, 4 redundant
+...
 ```
 
-Then use AskUserQuestion to let the user select which categories to expand:
-
-```
-AskUserQuestion(
-  questions: [{
-    question: "Which categories would you like me to expand?",
-    header: "Focus areas",
-    multiSelect: true,
-    options: [
-      { label: "Skill Discovery (8 issues)", description: "Missed skill opportunities, trigger overlaps" },
-      { label: "Agent Delegation (3 issues)", description: "Underused agents, agent overlaps" },
-      { label: "Hook Automation (5 issues)", description: "Missing project hooks, automation gaps" },
-      { label: "Configuration (2 issues)", description: "CLAUDE.md issues, stale references" },
-      { label: "Cleanup (12 issues)", description: "Never-used and redundant components" }
+2. Then IMMEDIATELY invoke the tool (only include categories with issues > 0):
+```json
+{
+  "questions": [{
+    "question": "Which categories would you like me to expand with detailed findings?",
+    "header": "Focus areas",
+    "multiSelect": true,
+    "options": [
+      { "label": "Skill Discovery (8)", "description": "Missed opportunities, trigger overlaps" },
+      { "label": "Configuration (2)", "description": "CLAUDE.md issues, stale references" },
+      { "label": "Cleanup (12)", "description": "Never-used and redundant components" }
     ]
   }]
-)
+}
 ```
+
+3. STOP and wait for user response before Phase 4.
 
 **If setup_profile.complexity is "minimal" or "moderate":**
 
