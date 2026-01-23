@@ -17,6 +17,7 @@ Run in this order:
 ## Input
 
 You receive insights from usage-insights-agent identifying:
+- Setup profile (complexity, shape, red flags, coverage gaps)
 - Missed opportunities (with specific prompts)
 - Configuration issues
 - Usage patterns
@@ -51,6 +52,49 @@ Ask yourself: "Would this fix help someone working on THIS project specifically?
 5. **Split item** - Only if clearly doing multiple unrelated things
 6. **Create new item** - Last resort
 
+### Coverage-Aware Recommendations
+
+When insights include coverage gaps, check for matching patterns in prompts:
+
+| Coverage Gap | Look For in Prompts | Recommendation |
+|--------------|---------------------|----------------|
+| testing | "test", "spec", "assert", "TDD" | Add test-driven-development skill |
+| debugging | "error", "bug", "fix", "investigate" | Add systematic-debugging skill |
+| event_sourcing | "aggregate", "event", "projection", "CQRS" | Add domain-specific skills |
+| documentation | "doc", "readme", "guide", "explain" | Add documentation skills |
+| security | "vulnerable", "secret", "security", "CVE" | Add security scanning skills |
+
+### Shape-Aware Recommendations
+
+Adjust recommendations based on setup shape:
+
+| Shape | Recommendation Approach |
+|-------|------------------------|
+| plugin-heavy | Don't suggest more plugins, focus on project customization |
+| hook-light | Suggest automation opportunities |
+| no-project-customization | Prioritize creating project-level CLAUDE.md |
+| global-heavy | Recommend moving relevant items to project level |
+
+### Removal Recommendations
+
+Identify components that add noise without value:
+
+| Scenario | Detection | Action |
+|----------|-----------|--------|
+| Never-used | 0 uses across 20+ sessions AND triggers don't match any prompts | Consider removing |
+| Redundant | 2+ skills cover same area, one never used | Remove unused one |
+| Stale global | Global component only matches one project's prompts | Move to project |
+| Disabled but present | CLAUDE.md says "don't use X" but X exists | Remove X entirely |
+
+Output removal candidates as:
+```
+### Removal Candidates
+| Component | Type | Reason | Last Used | Action |
+|-----------|------|--------|-----------|--------|
+| old-debug-skill | skill | Replaced by systematic-debugging | Never | Remove |
+| legacy-formatter | hook | Conflicts with prettier hook | 30d ago | Remove |
+```
+
 ### Hook Placement Rules
 
 **ALWAYS prefer project-level hooks over global hooks:**
@@ -78,7 +122,7 @@ Ask yourself: "Would this fix help someone working on THIS project specifically?
 
 For each improvement:
 
-```markdown
+```
 ### [item name]
 
 **Issue:** [from insights]
@@ -111,6 +155,7 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-collector/scripts/collec
 - Add hooks that duplicate existing skill/agent functionality
 - Recommend fixes for unrelated plugins (e.g., plugin-dev for a business app)
 - Suggest global skill/agent changes based on single-project patterns
+- Suggest adding more plugins when setup is already plugin-heavy
 
 **DO:**
 - Use specific, distinctive triggers
@@ -121,3 +166,4 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-collector/scripts/collec
 - Use hooks for automation (formatting, validation) not for workflow guidance
 - Focus fixes on the current project's domain and needs
 - Filter out noise from cross-project analysis
+- Recommend removals for unused/redundant components
