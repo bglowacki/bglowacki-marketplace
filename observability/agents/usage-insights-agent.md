@@ -116,32 +116,87 @@ Skip the selection step and auto-expand all categories with issues.
 
 ### Phase 4: Expand Selected Categories
 
-For each selected category (or all categories for minimal/moderate), output detailed findings:
+For each selected category, output findings using this **Problem → Impact → Action** format:
 
 ```
-## Skill Discovery (Detailed)
+## {Category Name}
 
-### Missed Opportunities
-- Prompt "help me debug this error" could have used systematic-debugging
-- Prompt "write tests for this" could have used test-driven-development
+### {Finding Type} (e.g., "Empty Descriptions", "Duplicate Components")
 
-### Trigger Overlaps
-- "debug": matched by systematic-debugging, debugger, root-cause-analyst
+**Why this matters:** {Explain WHY this is a problem in practical terms - what the user
+is missing out on, what breaks, or what confusion it causes}
 
+| Component | Impact | Action |
+|-----------|--------|--------|
+| {name} | {Specific consequence for THIS component} | {Concrete fix with example} |
+
+**Example fix:**
+```
+{Show exactly what to do, e.g., the description text to add, the file to edit}
+```
+```
+
+#### Finding Format Examples
+
+**Empty Descriptions:**
+```
 ### Empty Descriptions
-- skill-name has no description
+
+**Why this matters:** Components without descriptions won't be suggested by Claude
+when they could help. You have useful tools that never get discovered.
+
+| Component | Impact | Action |
+|-----------|--------|--------|
+| design-domain-events | Claude won't suggest this when you're designing events | Add description to ~/.claude/skills/design-domain-events.md |
+
+**Example fix for design-domain-events:**
+Add to frontmatter: `description: Design domain events for event-sourced aggregates following DDD patterns`
 ```
 
+**Duplicate Components:**
 ```
-## Cleanup (Detailed)
+### Duplicate Components
 
-### Never-Used Components
-| Component | Type | Last Matched | Action |
-|-----------|------|--------------|--------|
-| old-formatter | skill | Never | Consider removing |
+**Why this matters:** When the same skill exists in multiple places, Claude may pick
+the wrong one, updates must be made twice, and trigger conflicts cause unpredictable behavior.
 
-### Redundant Components
-- systematic-debugging and debugger overlap significantly
+| Duplicated | Locations | Impact | Action |
+|------------|-----------|--------|--------|
+| dna-arch-review | global + plugin:dna-toolkit | Triggers conflict, maintenance burden | Remove from global, keep plugin version |
+
+**How to fix:**
+1. Delete `~/.claude/skills/dna-arch-review.md`
+2. The plugin:dna-toolkit version will now be the only one
+```
+
+**Missed Opportunities:**
+```
+### Missed Skill Opportunities
+
+**Why this matters:** You typed commands manually that existing skills could have
+handled better, with proper workflows and error handling.
+
+| Your Prompt | Skill That Could Help | What You Missed |
+|-------------|----------------------|-----------------|
+| "help me debug this error" | systematic-debugging | 4-phase root cause analysis instead of guessing |
+| "write tests for this" | test-driven-development | Red-green-refactor workflow with proper assertions |
+```
+
+**Trigger Overlaps:**
+```
+### Trigger Overlaps
+
+**Why this matters:** Multiple components respond to the same trigger phrase.
+Claude picks one arbitrarily, which may not be the best choice.
+
+| Trigger | Components | Problem | Action |
+|---------|------------|---------|--------|
+| "debug" | systematic-debugging, debugger, root-cause-analyst | 3 tools compete for same trigger | Make triggers more specific, or consolidate |
+
+**How to differentiate:**
+- systematic-debugging: "systematic debug", "root cause investigation"
+- debugger: "quick debug", "inspect variables"
+- root-cause-analyst: "analyze failure", "investigate incident"
 ```
 
 ## Edge Cases
