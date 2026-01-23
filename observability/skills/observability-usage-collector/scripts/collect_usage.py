@@ -141,7 +141,8 @@ def compute_setup_profile(
 
     # Red flags
     red_flags = []
-    project_claude_md = [f for f in claude_md.get("files_found", []) if "CLAUDE.md" in f and ".claude" not in f and str(Path.home()) not in f]
+    global_claude_dir = str(Path.home() / ".claude")
+    project_claude_md = [f for f in claude_md.get("files_found", []) if "CLAUDE.md" in f and ".claude" not in f and not f.startswith(global_claude_dir)]
     if not project_claude_md:
         red_flags.append("No project-level CLAUDE.md")
     if by_source["project"]["hooks"] == 0 and by_source.get("project-local", {}).get("hooks", 0) == 0:
@@ -1419,10 +1420,12 @@ def main():
     print(f"  ✓ Found {len(skills)} skills, {len(agents)} agents, {len(commands)} commands, {len(hooks)} hooks", file=sys.stderr)
 
     print("\n[3/5] Parsing CLAUDE.md files...", file=sys.stderr)
+    # Use target project path if specified, otherwise current directory
+    target_project_dir = Path(project_path) if project_path != str(cwd) else cwd
     claude_md_paths = [
         home / ".claude" / "CLAUDE.md",
-        cwd / "CLAUDE.md",
-        cwd / ".claude" / "instructions.md",
+        target_project_dir / "CLAUDE.md",
+        target_project_dir / ".claude" / "instructions.md",
     ]
     claude_md = parse_claude_md_files(claude_md_paths)
     if claude_md["files_found"]:
