@@ -2,7 +2,7 @@
 name: usage-insights-agent
 description: Analyzes Claude Code usage data to identify patterns, missed opportunities, and configuration issues. Use after running usage-collector with JSON output. Triggers on "analyze usage data", "interpret usage", "what am I missing", or when usage JSON is provided.
 model: opus
-tools: Read, Bash, AskUserQuestion
+tools: Read, Bash
 ---
 
 # Usage Insights Agent
@@ -84,11 +84,9 @@ Count issues per category and calculate priority.
 
 **If setup_profile.complexity is "complex" (50+ components):**
 
-Present the category summary, then **IMMEDIATELY invoke the AskUserQuestion tool**.
+Output the category summary AND a structured JSON block for the parent agent to use.
 
-**CRITICAL: You MUST actually call the AskUserQuestion tool - do NOT just write text asking the question.**
-
-1. First, output the summary:
+1. First, output the markdown summary:
 ```
 ## Improvement Categories
 
@@ -97,27 +95,24 @@ Present the category summary, then **IMMEDIATELY invoke the AskUserQuestion tool
 ...
 ```
 
-2. Then IMMEDIATELY invoke the tool (only include categories with issues > 0):
+2. Then output this exact JSON block (the parent agent will parse it):
+```
+<!-- CATEGORY_SELECTION_REQUIRED -->
 ```json
 {
-  "questions": [{
-    "question": "Which categories would you like me to expand with detailed findings?",
-    "header": "Focus areas",
-    "multiSelect": true,
-    "options": [
-      { "label": "Skill Discovery (8)", "description": "Missed opportunities, trigger overlaps" },
-      { "label": "Configuration (2)", "description": "CLAUDE.md issues, stale references" },
-      { "label": "Cleanup (12)", "description": "Never-used and redundant components" }
-    ]
-  }]
+  "awaiting_selection": true,
+  "categories": [
+    { "id": "skill_discovery", "label": "Skill Discovery", "count": 8, "priority": "High", "description": "Missed opportunities, trigger overlaps" },
+    { "id": "configuration", "label": "Configuration", "count": 2, "priority": "Low", "description": "CLAUDE.md issues, stale references" }
+  ]
 }
 ```
 
-3. STOP and wait for user response before Phase 4.
+3. STOP here. The parent agent will ask the user which categories to expand, then resume you with instructions like: "Expand categories: configuration, cleanup"
 
 **If setup_profile.complexity is "minimal" or "moderate":**
 
-Skip the AskUserQuestion and auto-expand all categories with issues.
+Skip the selection step and auto-expand all categories with issues.
 
 ### Phase 4: Expand Selected Categories
 
