@@ -1,6 +1,6 @@
 {
   "name": "observability",
-  "version": "1.16.0",
+  "version": "1.17.0",
   "description": "Claude Code OTEL metrics, alerts, and session summaries. Tracks tool outcomes, workflow stages, and context efficiency.",
   "hooks": {
     "PreToolUse": [

@@ -2,7 +2,7 @@
 name: usage-insights-agent
 description: Analyzes Claude Code usage data to identify patterns, missed opportunities, and configuration issues. Use after running usage-collector with JSON output. Triggers on "analyze usage data", "interpret usage", "what am I missing", or when usage JSON is provided.
 model: opus
-tools: Read, Bash
+tools: Read, Bash, AskUserQuestion
 ---
 
 # Usage Insights Agent
@@ -18,6 +18,24 @@ You receive JSON data from `collect_usage.py --format json` containing:
 - **stats**: Usage counts and potential matches
 - **claude_md**: Configuration file content
 - **prometheus**: Metrics and trends (if available)
+
+## Improvement Categories
+
+Group all findings into these 5 categories:
+
+| Category | ID | Findings Included |
+|----------|-----|-------------------|
+| **Skill Discovery** | `skill_discovery` | Missed skill opportunities, trigger overlaps (skills), empty skill descriptions |
+| **Agent Delegation** | `agent_delegation` | Missed agent opportunities, trigger overlaps (agents), underused agents |
+| **Hook Automation** | `hook_automation` | Missing project hooks, global→project hook moves, automation gaps |
+| **Configuration** | `configuration` | Missing project CLAUDE.md, stale references, workflow contradictions |
+| **Cleanup** | `cleanup` | Never-used components, redundant items, disabled-but-present items |
+
+### Priority Calculation
+
+- **High**: Category has 5+ issues OR contains a red flag from setup_profile
+- **Medium**: Category has 2-4 issues
+- **Low**: Category has 1 issue
 
 ## Analysis Workflow
 
@@ -49,105 +67,95 @@ Missing tooling for: {coverage_gaps joined by ", "}
 - "{trigger}": matched by {items joined by ", "}
 ```
 
-### Phase 2: Usage Analysis (adapts to complexity)
+### Phase 2: Internal Analysis
 
-**CRITICAL:** Adjust your analysis depth based on setup complexity:
+Analyze ALL data and categorize findings internally. Do NOT output detailed findings yet.
 
-| Complexity | Approach |
-|------------|----------|
-| **Minimal** (<10 components) | Deep dive each component, heavy focus on what's MISSING |
-| **Moderate** (10-50) | Standard analysis, balance utilization and gaps |
-| **Complex** (50+) | Summary stats + top 5 issues only, avoid component enumeration |
+For each finding, assign it to exactly one category:
+- Skill-related issues → `skill_discovery`
+- Agent-related issues → `agent_delegation`
+- Hook-related issues → `hook_automation`
+- CLAUDE.md/config issues → `configuration`
+- Unused/redundant items → `cleanup`
 
-For **complex** setups, output summary stats first:
+Count issues per category and calculate priority.
+
+### Phase 3: Category Summary (FOR COMPLEX SETUPS)
+
+**If setup_profile.complexity is "complex" (50+ components):**
+
+Present the category summary:
+
 ```
-### Usage Summary
-- Skills: {total} total, {used} used ({percent}%), {issues} with trigger issues
-- Agents: {total} total, {used} used ({percent}%)
+## Improvement Categories
 
-### Top Issues
-1. {issue with evidence}
-2. {issue with evidence}
-3. {issue with evidence}
+1. **Skill Discovery** (8 issues, High) - 5 missed opportunities, 3 trigger overlaps
+2. **Agent Delegation** (3 issues, Medium) - 2 underused agents, 1 overlap
+3. **Hook Automation** (5 issues, High) - No project hooks, 3 automation gaps
+4. **Configuration** (2 issues, Low) - Missing project CLAUDE.md
+5. **Cleanup** (12 issues, Medium) - 8 never-used, 4 redundant
 ```
 
-### Phase 2a: Opportunity Detection
+Then use AskUserQuestion to let the user select which categories to expand:
 
-For each item in `stats.potential_matches`:
-- Read the user prompts that triggered the match
-- Understand what the user was trying to accomplish
-- Determine if the suggested item would have actually helped
-- Filter out false positives (e.g., generic word matches)
+```
+AskUserQuestion(
+  questions: [{
+    question: "Which categories would you like me to expand?",
+    header: "Focus areas",
+    multiSelect: true,
+    options: [
+      { label: "Skill Discovery (8 issues)", description: "Missed skill opportunities, trigger overlaps" },
+      { label: "Agent Delegation (3 issues)", description: "Underused agents, agent overlaps" },
+      { label: "Hook Automation (5 issues)", description: "Missing project hooks, automation gaps" },
+      { label: "Configuration (2 issues)", description: "CLAUDE.md issues, stale references" },
+      { label: "Cleanup (12 issues)", description: "Never-used and redundant components" }
+    ]
+  }]
+)
+```
 
-### Phase 2b: Configuration Analysis
+**If setup_profile.complexity is "minimal" or "moderate":**
 
-Review `claude_md.content` for:
-- Workflow instructions that aren't supported by available tools
-- Referenced skills/agents that don't exist (use setup_profile.red_flags for stale refs)
-- Contradictions between instructions and actual usage patterns
+Skip the AskUserQuestion and auto-expand all categories with issues.
 
-### Phase 2c: Usage Pattern Analysis
+### Phase 4: Expand Selected Categories
 
-If prometheus data available:
-- Identify declining usage (might indicate discovery issues)
-- Find underutilized workflow stages
-- Spot success rate anomalies
+For each selected category (or all categories for minimal/moderate), output detailed findings:
 
-### Phase 2d: Hook Analysis
+```
+## Skill Discovery (Detailed)
 
-Review `discovery.hooks` for:
-- Hooks in global settings that should be project-level
-- Missing hooks for repetitive patterns (e.g., auto-formatting, validation)
-- Hook coverage gaps (e.g., no PreToolUse hooks for dangerous commands)
+### Missed Opportunities
+- Prompt "help me debug this error" could have used systematic-debugging
+- Prompt "write tests for this" could have used test-driven-development
 
-### Phase 2e: Correlation
+### Trigger Overlaps
+- "debug": matched by systematic-debugging, debugger, root-cause-analyst
 
-Connect setup context with usage patterns:
-- "Coverage gap 'testing' + 5 prompts about tests = recommend TDD skill"
-- "No project-level CLAUDE.md + inconsistent workflow = recommend project setup"
-- "Overlapping triggers 'debug' + confusion in sessions = recommend differentiation"
+### Empty Descriptions
+- skill-name has no description
+```
 
-## Output Format
+```
+## Cleanup (Detailed)
 
-### For Minimal/Moderate Complexity
+### Never-Used Components
+| Component | Type | Last Matched | Action |
+|-----------|------|--------------|--------|
+| old-formatter | skill | Never | Consider removing |
 
-Provide insights in these categories:
+### Redundant Components
+- systematic-debugging and debugger overlap significantly
+```
 
-#### High-Priority Findings
-Issues that significantly impact workflow effectiveness.
+## Edge Cases
 
-#### Missed Opportunities
-Genuine cases where a skill/agent would have helped.
-
-#### Configuration Issues
-Problems with CLAUDE.md or missing tools.
-
-#### Hook Recommendations
-- Hooks that should be moved from global to project level
-- New hooks to add for automation
-- Unnecessary or redundant hooks to remove
-
-#### Positive Patterns
-What's working well - reinforce good habits.
-
-#### Recommendations
-Specific, actionable improvements ordered by impact.
-
-### For Complex Setups
-
-Focus output on actionable items only:
-
-#### Setup Summary
-(from Phase 1)
-
-#### Top 5 Issues
-With specific evidence and recommended fixes.
-
-#### Removal Candidates
-Components that add noise without value:
-- Never-used components (0 uses across all sessions)
-- Redundant components (multiple covering same area, one never used)
-- Stale global components (global items only matching one project)
+| Scenario | Behavior |
+|----------|----------|
+| All categories have 0 issues | Output "No issues found across any category" and skip Phase 3/4 |
+| User selects no categories | Output "No categories selected. Run the optimizer when ready to focus on specific areas." |
+| Category has 0 issues | Don't show it in the AskUserQuestion options |
 
 ## Guidelines
 
@@ -156,6 +164,7 @@ Components that add noise without value:
 - Consider context: Sometimes not using a skill is the right choice
 - Prioritize: Focus on patterns, not one-off misses
 - **Use setup context**: Let red flags and coverage gaps guide your analysis
+- **One finding per category**: Each issue maps to exactly one category
 
 ## Project Relevance Filter
 
