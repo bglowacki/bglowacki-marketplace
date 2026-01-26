@@ -203,18 +203,68 @@ def compute_setup_profile(
     )
 
 
+def read_plugin_enabled_states(
+    global_settings: Path,
+    project_settings: Path,
+) -> dict[str, bool]:
+    """Read plugin enabled/disabled states from settings.
+
+    Project settings override global settings.
+    Returns dict mapping plugin_id -> enabled (True/False).
+    """
+    enabled_states: dict[str, bool] = {}
+
+    # Read global settings first
+    if global_settings.exists():
+        try:
+            settings = json.loads(global_settings.read_text())
+            for plugin_id, enabled in settings.get("enabledPlugins", {}).items():
+                enabled_states[plugin_id] = enabled
+        except (json.JSONDecodeError, Exception):
+            pass
+
+    # Project settings override global
+    if project_settings.exists():
+        try:
+            settings = json.loads(project_settings.read_text())
+            for plugin_id, enabled in settings.get("enabledPlugins", {}).items():
+                enabled_states[plugin_id] = enabled
+        except (json.JSONDecodeError, Exception):
+            pass
+
+    return enabled_states
+
+
 def compute_plugin_usage(
     skills: list[SkillOrAgent],
     agents: list[SkillOrAgent],
     sessions: list,  # list[SessionData]
     potential_matches: list,  # list[MissedOpportunity]
+    enabled_states: dict[str, bool] | None = None,
 ) -> dict[str, list[str]]:
-    """Compute plugin usage: active, potential, or unused.
+    """Compute plugin usage: active, potential, unused, or disabled_but_matched.
 
     - active: Plugin was used in sessions (skill/agent triggered)
-    - potential: Plugin matched prompts but wasn't triggered
-    - unused: Plugin has no activity at all
+    - potential: Plugin is ENABLED, matched prompts but wasn't triggered
+    - unused: Plugin is ENABLED but has no activity at all
+    - disabled_but_matched: Plugin is DISABLED but matched prompts (might want to enable)
+
+    Args:
+        enabled_states: Dict mapping plugin_id (e.g., "plugin@marketplace") -> enabled bool.
+                       If None, assumes all discovered plugins are enabled.
     """
+    enabled_states = enabled_states or {}
+
+    def is_plugin_enabled(plugin_name: str) -> bool:
+        """Check if plugin is enabled. Unknown plugins assumed enabled (discovered = installed)."""
+        # Find full plugin ID (plugin_name@marketplace) in enabled_states
+        for plugin_id, enabled in enabled_states.items():
+            # Match by plugin name (before @)
+            if plugin_id.split("@")[0] == plugin_name:
+                return enabled
+        # Plugin not in settings = assumed enabled (it's installed/discovered)
+        return True
+
     # Get all plugins from discovery
     all_plugins: set[str] = set()
     plugin_to_components: dict[str, list[str]] = defaultdict(list)
@@ -247,22 +297,43 @@ def compute_plugin_usage(
                 active.add(plugin)
                 break
 
-    # Check which plugins had potential matches
-    potential: set[str] = set()
+    # Check which plugins had potential matches (matched prompts but weren't used)
+    matched_but_not_used: set[str] = set()
     for match in potential_matches:
         source = match.matched_item.source_type
         if source.startswith("plugin:"):
             plugin_name = source.replace("plugin:", "")
             if plugin_name not in active:
-                potential.add(plugin_name)
+                matched_but_not_used.add(plugin_name)
 
-    # Rest are unused
-    unused = all_plugins - active - potential
+    # Classify based on enabled state
+    potential: set[str] = set()  # Enabled + matched but not used
+    disabled_but_matched: set[str] = set()  # Disabled + matched (might want to enable)
+
+    for plugin in matched_but_not_used:
+        if is_plugin_enabled(plugin):
+            potential.add(plugin)
+        else:
+            disabled_but_matched.add(plugin)
+
+    # Unused = enabled plugins with no activity at all
+    # Don't include disabled plugins here - they're disabled on purpose
+    all_with_no_activity = all_plugins - active - matched_but_not_used
+    unused: set[str] = set()
+    already_disabled: set[str] = set()
+
+    for plugin in all_with_no_activity:
+        if is_plugin_enabled(plugin):
+            unused.add(plugin)
+        else:
+            already_disabled.add(plugin)
 
     return {
         "active": sorted(active),
         "potential": sorted(potential),
         "unused": sorted(unused),
+        "disabled_but_matched": sorted(disabled_but_matched),
+        "already_disabled": sorted(already_disabled),
     }
 
 
@@ -1499,12 +1570,25 @@ def main():
     missed, jsonl_stats = analyze_jsonl(skills, agents, commands, sessions)
     print(f"  ✓ Found {len(missed)} potential matches", file=sys.stderr)
 
+    # Read plugin enabled states from settings (project overrides global)
+    enabled_states = read_plugin_enabled_states(
+        home / ".claude" / "settings.json",
+        target_project_dir / ".claude" / "settings.json",
+    )
+
     # Compute plugin usage after we have session data and matches
-    setup_profile.plugin_usage = compute_plugin_usage(skills, agents, sessions, missed)
+    setup_profile.plugin_usage = compute_plugin_usage(skills, agents, sessions, missed, enabled_states)
     active_count = len(setup_profile.plugin_usage["active"])
     unused_count = len(setup_profile.plugin_usage["unused"])
+    disabled_matched_count = len(setup_profile.plugin_usage.get("disabled_but_matched", []))
+    already_disabled_count = len(setup_profile.plugin_usage.get("already_disabled", []))
+
     if unused_count > 0:
-        print(f"  → {unused_count} plugins unused, {active_count} active", file=sys.stderr)
+        print(f"  → {unused_count} enabled but unused, {active_count} active", file=sys.stderr)
+    if disabled_matched_count > 0:
+        print(f"  → {disabled_matched_count} disabled but potentially useful", file=sys.stderr)
+    if already_disabled_count > 0:
+        print(f"  → {already_disabled_count} already disabled (no action needed)", file=sys.stderr)
     print("", file=sys.stderr)
 
     # Output

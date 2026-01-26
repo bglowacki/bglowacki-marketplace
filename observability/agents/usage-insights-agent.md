@@ -41,7 +41,14 @@ Group all findings into these 5 categories:
 
 ### Phase 0: Plugin Efficiency (ALWAYS DO FIRST)
 
-Check `setup_profile.plugin_usage` and output:
+Check `setup_profile.plugin_usage` which now includes enabled/disabled state awareness:
+- **active**: Used in sessions
+- **potential**: Enabled + matched prompts but not triggered
+- **unused**: Enabled but no activity (recommend disabling)
+- **disabled_but_matched**: Disabled but matched prompts (consider enabling)
+- **already_disabled**: Disabled and no matches (no action needed)
+
+Output:
 
 ```markdown
 ## Plugin Efficiency
@@ -53,15 +60,26 @@ Used in your sessions - keep these.
 Matched your prompts but never triggered. Consider using or improving triggers.
 
 **Unused plugins ({count}):** {unused plugins joined by ", "}
-Taking up context with no benefit for this project.
+Enabled but taking up context with no benefit for this project.
 
-**Recommendation:** Disable unused plugins to reduce context overhead.
+**Consider enabling ({disabled_but_matched count}):** {disabled_but_matched plugins joined by ", "}
+Currently disabled, but matched your prompts - you might want to enable these.
+
+**Already disabled ({already_disabled count}):** {already_disabled plugins joined by ", "}
+Already disabled in settings - no action needed.
 ```
 
-If there are 5+ unused plugins, add:
+If there are unused plugins (enabled but not used), recommend disabling:
 ```markdown
-To disable for this project only, add to `.claude/settings.json`:
-{"disabled_plugins": ["plugin-name", ...]}
+**Recommendation:** Disable unused plugins to reduce context overhead.
+Add to `.claude/settings.json`:
+{"enabledPlugins": {"plugin-name@marketplace": false, ...}}
+```
+
+If there are disabled_but_matched plugins, suggest:
+```markdown
+**Consider enabling:** These plugins matched your prompts but are disabled.
+To enable: {"enabledPlugins": {"plugin-name@marketplace": true}}
 ```
 
 ### Relevance Filter
@@ -70,9 +88,14 @@ To disable for this project only, add to `.claude/settings.json`:
 - Global config (always relevant)
 - Project config (always relevant)
 - Active plugins (used in sessions)
-- Potential plugins (matched prompts)
+- Potential plugins (enabled + matched prompts)
+- Disabled-but-matched plugins (disabled but matched prompts - suggest enabling)
 
-**SKIP all findings for unused plugins.** They are not relevant to this project.
+**SKIP all findings for:**
+- Unused plugins (enabled but no activity - just recommend disabling)
+- Already-disabled plugins (no action needed)
+
+This prevents recommending disabling plugins that are already disabled.
 
 ### Phase 1: Setup Understanding
 
@@ -255,17 +278,22 @@ Claude picks one arbitrarily, which may not be the best choice.
 
 **Use `setup_profile.plugin_usage` to filter:**
 
-| Plugin Status | Include in Analysis? |
-|---------------|---------------------|
-| active | Yes - user is using this |
-| potential | Yes - user could benefit |
-| unused | **NO** - skip entirely |
-| global | Yes - always relevant |
-| project | Yes - always relevant |
+| Plugin Status | Include in Analysis? | Reason |
+|---------------|---------------------|--------|
+| active | Yes | User is using this |
+| potential | Yes | User could benefit |
+| disabled_but_matched | Yes (suggest enabling) | Matched prompts but disabled |
+| unused | **NO** | Enabled but irrelevant to this project |
+| already_disabled | **NO** | Already disabled, no action needed |
+| global | Yes | Always relevant |
+| project | Yes | Always relevant |
 
 **Before outputting any finding, check:**
 1. What's the source of this component?
-2. If it's from a plugin, is that plugin active or potential?
-3. If unused → don't mention it at all
+2. If it's from a plugin, is that plugin active, potential, or disabled_but_matched?
+3. If unused or already_disabled → don't mention it at all
 
-This ensures plugin-dev issues don't appear for widget-service, etc.
+This ensures:
+- Plugin-dev issues don't appear for widget-service
+- Already-disabled plugins aren't recommended for disabling again
+- Potentially useful disabled plugins are surfaced
