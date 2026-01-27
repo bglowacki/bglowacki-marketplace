@@ -1,7 +1,7 @@
 # ADR-012: Plugin Version Documentation Mismatch
 
 ## Status
-PROPOSED
+IMPLEMENTED (2026-01-27)
 
 ## Context
 Various documentation references different versions:
@@ -17,7 +17,7 @@ There's no single source of truth for version history. Users can't determine:
 - Breaking changes between versions
 
 ## Decision
-TBD - Needs review
+ACCEPTED - Created `observability/CHANGELOG.md` with full version history from v1.0.0 to v2.3.0.
 
 ## Recommendation
 1. Add `CHANGELOG.md` following Keep a Changelog format:

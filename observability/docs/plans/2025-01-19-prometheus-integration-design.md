@@ -1,7 +1,10 @@
 # Usage Analyzer Prometheus Integration Design
 
+> **SUPERSEDED**: This design was implemented but later removed in v2.0.0
+> (refactor to JSONL-only architecture). Kept for historical reference.
+
 **Date:** 2025-01-19
-**Status:** Approved
+**Status:** Superseded
 
 ## Overview
 

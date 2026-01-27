@@ -1,7 +1,7 @@
 # ADR-018: Add Project-Level CLAUDE.md
 
 ## Status
-PROPOSED
+IMPLEMENTED (2026-01-27)
 
 ## Context
 The project has `observability/CLAUDE.md` for the plugin subdirectory, but no root-level `CLAUDE.md` for the marketplace repository itself.
@@ -18,7 +18,7 @@ The `observability/CLAUDE.md` is specific to the observability plugin. The root 
 - Plugin development patterns
 
 ## Decision
-TBD - Needs review
+ACCEPTED - Created root `CLAUDE.md` with project structure, plugin development guidelines, code style, and common commands.
 
 ## Recommendation
 Create root `CLAUDE.md` with:

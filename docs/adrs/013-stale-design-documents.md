@@ -1,7 +1,7 @@
 # ADR-013: Archive Stale Design Documents
 
 ## Status
-PROPOSED
+IMPLEMENTED (2026-01-27)
 
 ## Context
 The `observability/docs/plans/` directory contains design documents for features that were later removed or significantly changed:
@@ -19,7 +19,7 @@ Having "Approved" design documents for removed features creates confusion:
 - No record of WHY features were removed
 
 ## Decision
-TBD - Needs review
+ACCEPTED - Implemented Option B. Added superseded note and changed status to "Superseded" in prometheus design doc.
 
 ## Options
 

@@ -1,7 +1,7 @@
 # ADR-008: Add JSON Schema Version Changelog
 
 ## Status
-PROPOSED
+IMPLEMENTED (2026-01-27)
 
 ## Context
 The `collect_usage.py` script outputs JSON with a schema version:
@@ -23,7 +23,7 @@ Without a changelog:
 - No migration guidance for downstream tools
 
 ## Decision
-TBD - Needs review
+ACCEPTED - Created `observability/SCHEMA_CHANGELOG.md` documenting v3.0 and v3.1 changes with migration notes.
 
 ## Recommendation
 Add `SCHEMA_CHANGELOG.md` documenting:
