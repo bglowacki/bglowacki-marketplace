@@ -49,6 +49,13 @@ class Hook:
 
 
 @dataclass
+class InterruptedTool:
+    tool_name: str
+    tool_input: dict
+    followup_message: str  # What user said after interrupting
+
+
+@dataclass
 class SessionData:
     session_id: str
     prompts: list[str] = field(default_factory=list)
@@ -56,11 +63,13 @@ class SessionData:
     agents_used: set[str] = field(default_factory=set)
     tools_used: set[str] = field(default_factory=set)
     hooks_triggered: dict[str, int] = field(default_factory=lambda: defaultdict(int))
-    # New fields for outcomes and compactions
+    # Outcome tracking
     success_count: int = 0
     failure_count: int = 0
     interrupted_count: int = 0
     compaction_count: int = 0
+    # Interrupted tools with context
+    interrupted_tools: list[InterruptedTool] = field(default_factory=list)
 
 
 @dataclass
@@ -727,6 +736,28 @@ def _is_system_prompt(content: str) -> bool:
     return False
 
 
+def _summarize_tool_input(tool_name: str, tool_input: dict) -> str:
+    """Extract meaningful context from tool input."""
+    if tool_name == "Bash":
+        cmd = tool_input.get("command", "")
+        return cmd[:100] if cmd else ""
+    if tool_name in ("Edit", "Write", "Read"):
+        return tool_input.get("file_path", "")[:100]
+    if tool_name == "Skill":
+        return tool_input.get("skill", "")
+    if tool_name == "Task":
+        agent = tool_input.get("subagent_type", "")
+        desc = tool_input.get("description", "")
+        return f"{agent}: {desc}"[:100] if desc else agent
+    if tool_name == "Grep":
+        pattern = tool_input.get("pattern", "")
+        return f"pattern: {pattern}"[:100]
+    if tool_name == "Glob":
+        pattern = tool_input.get("pattern", "")
+        return f"glob: {pattern}"[:100]
+    return str(tool_input)[:100]
+
+
 def detect_outcome(tool_name: str, result: str) -> str:
     """Detect outcome from tool result content."""
     result_lower = result.lower()
@@ -797,7 +828,8 @@ def find_project_sessions(projects_dir: Path, project_dir: Path, max_sessions: i
 def parse_session_file(session_path: Path) -> SessionData:
     """Parse a session JSONL file with outcome and compaction tracking."""
     session_data = SessionData(session_id=session_path.stem[:8])
-    pending_tools: dict[str, str] = {}  # tool_use_id -> tool_name
+    pending_tools: dict[str, tuple[str, dict]] = {}  # tool_use_id -> (tool_name, tool_input)
+    awaiting_followup: list[tuple[str, dict]] = []  # Tools that were interrupted, waiting for next user message
 
     try:
         lines = session_path.read_text().strip().split("\n")
@@ -816,11 +848,15 @@ def parse_session_file(session_path: Path) -> SessionData:
                     message = entry.get("message", {})
                     content = message.get("content", "")
 
-                    # Check for interruptions and tool results
+                    # Extract user text from message (for followup capture)
+                    user_text = ""
+                    is_interruption = False
+
                     if isinstance(content, str):
                         if "[Request interrupted by user]" in content:
-                            session_data.interrupted_count += 1
+                            is_interruption = True
                         elif content.strip() and not _is_system_prompt(content):
+                            user_text = content
                             session_data.prompts.append(content)
                     elif isinstance(content, list):
                         for item in content:
@@ -829,16 +865,19 @@ def parse_session_file(session_path: Path) -> SessionData:
                                 if item_type == "text":
                                     text = item.get("text", "")
                                     if "[Request interrupted by user]" in text:
-                                        session_data.interrupted_count += 1
+                                        is_interruption = True
                                     elif not _is_system_prompt(text):
+                                        if not user_text:  # Take first non-system text
+                                            user_text = text
                                         session_data.prompts.append(text)
                                 elif item_type == "tool_result":
                                     # Tool results are in user messages
                                     tool_use_id = item.get("tool_use_id", "")
                                     result = item.get("content", "")
 
-                                    # Get tool name and remove from pending
-                                    tool_name = pending_tools.pop(tool_use_id, "unknown")
+                                    # Get tool info and remove from pending
+                                    tool_info = pending_tools.pop(tool_use_id, ("unknown", {}))
+                                    tool_name = tool_info[0]
 
                                     if isinstance(result, str):
                                         outcome = detect_outcome(tool_name, result)
@@ -846,6 +885,24 @@ def parse_session_file(session_path: Path) -> SessionData:
                                             session_data.success_count += 1
                                         else:
                                             session_data.failure_count += 1
+
+                    # Handle interruption - capture which tools were pending
+                    if is_interruption:
+                        session_data.interrupted_count += 1
+                        # Mark all pending tools as interrupted, awaiting followup
+                        for tool_use_id, (tool_name, tool_input) in pending_tools.items():
+                            awaiting_followup.append((tool_name, tool_input))
+                        pending_tools.clear()
+
+                    # If we have tools awaiting followup and user said something, capture it
+                    elif user_text and awaiting_followup:
+                        for tool_name, tool_input in awaiting_followup:
+                            session_data.interrupted_tools.append(InterruptedTool(
+                                tool_name=tool_name,
+                                tool_input=tool_input,
+                                followup_message=user_text[:500],  # Limit length
+                            ))
+                        awaiting_followup.clear()
 
                 elif entry_type == "assistant":
                     message = entry.get("message", {})
@@ -858,9 +915,9 @@ def parse_session_file(session_path: Path) -> SessionData:
                                 tool_use_id = item.get("id", "")
                                 tool_input = item.get("input", {})
 
-                                # Track pending tools
+                                # Track pending tools with full info
                                 if tool_use_id:
-                                    pending_tools[tool_use_id] = tool_name
+                                    pending_tools[tool_use_id] = (tool_name, tool_input)
 
                                 if tool_name == "Skill":
                                     skill = tool_input.get("skill", "")
@@ -878,8 +935,14 @@ def parse_session_file(session_path: Path) -> SessionData:
             except json.JSONDecodeError:
                 continue
 
-        # Remaining pending tools are interrupted
-        session_data.interrupted_count += len(pending_tools)
+        # Remaining pending tools at session end are interrupted (no followup available)
+        for tool_use_id, (tool_name, tool_input) in pending_tools.items():
+            session_data.interrupted_count += 1
+            session_data.interrupted_tools.append(InterruptedTool(
+                tool_name=tool_name,
+                tool_input=tool_input,
+                followup_message="[session ended]",
+            ))
 
     except Exception as e:
         print(f"Warning: Could not parse {session_path}: {e}", file=sys.stderr)
@@ -993,11 +1056,11 @@ def generate_analysis_json(
     return {
         "_schema": {
             "description": "Claude Code usage analysis data for agent interpretation",
-            "version": "3.0",
+            "version": "3.1",
             "sections": {
                 "discovery": "All available skills, agents, commands, and hooks discovered from global, project, and plugin sources",
                 "sessions": "Parsed session data showing what was actually used",
-                "stats": "Aggregated statistics on usage, outcomes, and missed opportunities",
+                "stats": "Aggregated statistics on usage, outcomes, interruptions with followup context, and missed opportunities",
                 "claude_md": "Content and structure of CLAUDE.md configuration files",
                 "setup_profile": "Computed setup profile with complexity, shape, red flags, and coverage gaps",
             },
@@ -1081,6 +1144,15 @@ def generate_analysis_json(
                 "total": jsonl_stats["total_compactions"],
                 "avg_tools_per": round(avg_tools_per_compaction, 1),
             },
+            "interruptions": [
+                {
+                    "tool": it.tool_name,
+                    "context": _summarize_tool_input(it.tool_name, it.tool_input),
+                    "followup": it.followup_message,
+                }
+                for s in sessions
+                for it in s.interrupted_tools
+            ][:20],  # Limit to 20 most recent
         },
 
         "claude_md": claude_md,
