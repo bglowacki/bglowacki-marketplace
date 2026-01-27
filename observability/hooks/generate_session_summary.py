@@ -81,7 +81,10 @@ def detect_outcome(tool_name: str, result: str) -> str:
 
 
 def infer_workflow_stage(tool_name: str, tool_input: dict, current_stage: str) -> str:
-    """Infer workflow stage from tool usage."""
+    """Infer workflow stage from tool usage.
+
+    Stages: unknown → research → brainstorm → plan → implement → test → review → commit → deploy
+    """
     if tool_name == "Skill":
         skill = tool_input.get("skill", "").lower()
         if "brainstorm" in skill:
@@ -94,6 +97,14 @@ def infer_workflow_stage(tool_name: str, tool_input: dict, current_stage: str) -
             return "test"
         if "commit" in skill:
             return "commit"
+        if "debug" in skill or "systematic-debug" in skill:
+            return "debug"
+
+    # Research stage: reading/searching when not yet implementing (ADR-011)
+    if tool_name in ("Read", "Grep", "Glob", "WebFetch", "WebSearch"):
+        if current_stage in ("unknown", "brainstorm", "plan"):
+            return "research"
+        # During implementation, reading is part of the current stage
 
     if tool_name in ("Edit", "Write"):
         return "implement"
@@ -113,6 +124,10 @@ def infer_workflow_stage(tool_name: str, tool_input: dict, current_stage: str) -
             return "review"
         if "test" in agent:
             return "test"
+        if "debug" in agent:
+            return "debug"
+        if "explore" in agent or "research" in agent:
+            return "research"
 
     return current_stage
 
