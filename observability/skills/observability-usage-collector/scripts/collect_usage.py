@@ -235,8 +235,10 @@ def read_plugin_enabled_states(
             settings = json.loads(global_settings.read_text())
             for plugin_id, enabled in settings.get("enabledPlugins", {}).items():
                 enabled_states[plugin_id] = enabled
-        except (json.JSONDecodeError, Exception):
-            pass
+        except json.JSONDecodeError as e:
+            print(f"Warning: Corrupted {global_settings}: {e}", file=sys.stderr)
+        except Exception as e:
+            print(f"Warning: Could not read {global_settings}: {e}", file=sys.stderr)
 
     # Project settings override global
     if project_settings.exists():
@@ -244,8 +246,10 @@ def read_plugin_enabled_states(
             settings = json.loads(project_settings.read_text())
             for plugin_id, enabled in settings.get("enabledPlugins", {}).items():
                 enabled_states[plugin_id] = enabled
-        except (json.JSONDecodeError, Exception):
-            pass
+        except json.JSONDecodeError as e:
+            print(f"Warning: Corrupted {project_settings}: {e}", file=sys.stderr)
+        except Exception as e:
+            print(f"Warning: Could not read {project_settings}: {e}", file=sys.stderr)
 
     return enabled_states
 

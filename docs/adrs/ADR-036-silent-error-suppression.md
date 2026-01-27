@@ -1,6 +1,6 @@
 # ADR-036: Silent Error Suppression in Plugin/Settings Parsing
 
-**Status:** ACCEPTED
+**Status:** IMPLEMENTED (2026-01-27)
 **Date:** 2026-01-27
 **Category:** Quality
 **Source:** Code exploration finding

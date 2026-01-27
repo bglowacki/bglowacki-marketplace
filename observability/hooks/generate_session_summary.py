@@ -21,8 +21,11 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-
-SUMMARY_DIR = Path.home() / ".claude" / "session-summaries"
+# Path constants (ADR-020: Centralize Path.home())
+HOME = Path.home()
+CLAUDE_DIR = HOME / ".claude"
+PROJECTS_DIR = CLAUDE_DIR / "projects"
+SUMMARY_DIR = CLAUDE_DIR / "session-summaries"
 
 
 def get_session_file(session_id: str, cwd: str) -> Path | None:
@@ -30,14 +33,13 @@ def get_session_file(session_id: str, cwd: str) -> Path | None:
     if not session_id or not cwd:
         return None
 
-    projects_dir = Path.home() / ".claude" / "projects"
     project_folder = cwd.replace("/", "-")
     if project_folder.startswith("-"):
         project_folder = project_folder[1:]
 
-    project_dir = projects_dir / f"-{project_folder}"
+    project_dir = PROJECTS_DIR / f"-{project_folder}"
     if not project_dir.exists():
-        project_dir = projects_dir / project_folder
+        project_dir = PROJECTS_DIR / project_folder
 
     if not project_dir.exists():
         return None

@@ -1,7 +1,7 @@
 # ADR-003: Deduplicate Outcome Detection Logic
 
 ## Status
-PROPOSED
+IMPLEMENTED (2026-01-27) - Option B
 
 ## Context
 The `detect_outcome` function exists in two files with identical logic:
@@ -16,7 +16,7 @@ Both functions detect success/failure from tool results using the same patterns.
 **Risk**: If one implementation is updated, the other may be forgotten, leading to inconsistent behavior between session summaries and usage analysis.
 
 ## Decision
-TBD - Needs review
+ACCEPTED - Implemented Option B (keep duplication with sync comments). Both files have NOTE comments linking them and tests verify both implementations behave identically.
 
 ## Options
 

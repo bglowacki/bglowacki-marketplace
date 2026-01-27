@@ -1,7 +1,7 @@
 # ADR-020: Centralize Path.home() Usage
 
 ## Status
-PROPOSED
+IMPLEMENTED (2026-01-27)
 
 ## Context
 The codebase has multiple occurrences of `Path.home()` creating the same paths:
@@ -18,7 +18,7 @@ This repetition:
 - Unclear if paths are configurable
 
 ## Decision
-TBD - Needs review
+ACCEPTED - Path constants added to both files (HOME, CLAUDE_DIR, PROJECTS_DIR, SUMMARIES_DIR, PLUGINS_CACHE).
 
 ## Recommendation
 Create a shared constants module or define at module level:

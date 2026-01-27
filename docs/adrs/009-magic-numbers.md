@@ -1,7 +1,7 @@
 # ADR-009: Extract Magic Numbers to Constants
 
 ## Status
-PROPOSED
+IMPLEMENTED (2026-01-27)
 
 ## Context
 The codebase contains several magic numbers without named constants:
@@ -22,7 +22,7 @@ The codebase contains several magic numbers without named constants:
 Magic numbers make code harder to understand and maintain. When the same value is used in multiple places, inconsistencies can arise.
 
 ## Decision
-TBD - Needs review
+ACCEPTED - Constants added to collect_usage.py (MAX_DESCRIPTION_LENGTH, MAX_TOOL_INPUT_LENGTH, MAX_PROMPT_LENGTH, DEFAULT_SESSIONS, DEFAULT_DAYS).
 
 ## Recommendation
 Create constants section at top of each file:

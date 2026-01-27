@@ -1,6 +1,6 @@
 # ADR-035: Add Test Coverage for find_matches() Function
 
-**Status:** ACCEPTED
+**Status:** IMPLEMENTED (2026-01-27)
 **Date:** 2026-01-27
 **Category:** Quality
 **Source:** Research finding from ADR-011 false positive analysis
