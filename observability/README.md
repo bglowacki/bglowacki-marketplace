@@ -1,59 +1,76 @@
 # Observability Plugin
 
-Claude Code plugin for OTEL-based metrics, alerts, and session summaries.
+Claude Code plugin for session analysis and usage insights using built-in JSONL session logs.
 
 ## Features
 
-- Tracks tool invocations, outcomes, and workflow stages
-- Monitors skills, agents, and context efficiency
 - Generates session summaries saved to `~/.claude/session-summaries/`
-- Sends macOS notifications for alerts
-- Integrates with Kubernetes observability stack (Prometheus, Alertmanager)
-
-## Prerequisites
-
-- Kubernetes cluster (OrbStack recommended)
-- `kubectl` configured
-- `helm` installed
-- `uv` package manager
+- Tracks tool outcomes (success/failure/interrupted)
+- Monitors workflow stages and compactions
+- Analyzes skill/agent usage patterns
+- Sends macOS notifications on session end
 
 ## Quick Start
 
-Run the setup skill:
-
-```
-/observability-setup
-```
-
-See [skills/observability-setup/SKILL.md](skills/observability-setup/SKILL.md) for detailed setup instructions.
+No setup required - the plugin works automatically with Claude Code's built-in session logs.
 
 ## Available Skills
 
 | Skill | Description |
 |-------|-------------|
-| `/observability-setup` | Deploy full observability stack to Kubernetes |
-| `/observability-uninstall` | Remove entire stack (OTEL, Prometheus, Grafana, cert-manager) |
-| `/observability-usage-collector` | Collect session data and metrics for analysis |
+| `/observability-usage-collector` | Collect session data for analysis |
 | `/observability-workflow-optimizer` | Suggest improvements based on usage analysis |
 
-## Configuration
+## How It Works
 
-All configuration is handled automatically by `/observability-setup`. No manual environment variables needed.
+```
+Session JSONL files → collect_usage.py → usage-insights-agent → recommendations
+                   ↓
+         Stop hook → generate_session_summary.py → session summaries
+```
 
-> **Note:** `CLAUDE_CODE_ENABLE_TELEMETRY` is **not required** and can cause exit hangs. This plugin uses its own metrics pipeline.
+### Data Sources
 
-## Utility Scripts
+- **Session JSONL files**: `~/.claude/projects/{project}/*.jsonl`
+- **Session summaries**: `~/.claude/session-summaries/{date}_{session_id}.json`
 
-| Script | Description |
-|--------|-------------|
-| `scripts/check-health.sh` | Verify all components are running |
-| `scripts/teardown.sh` | Stop local services |
+### What Gets Tracked
+
+- Tool invocations and outcomes
+- Skill and agent usage
+- Workflow stages (brainstorm, plan, implement, test, review, commit)
+- Context compactions
+- User interruptions
+
+## Usage
+
+### Collect Usage Data
+
+```bash
+uv run observability/skills/observability-usage-collector/scripts/collect_usage.py --format json --sessions 20
+```
+
+### Quick Stats
+
+```bash
+uv run observability/skills/observability-usage-collector/scripts/collect_usage.py --quick-stats --days 14
+```
+
+### Analyze with Agent
+
+After collecting data, use the usage-insights-agent:
+
+```
+Analyze this usage data: <output from collector>
+```
 
 ## Architecture
 
-```
-SessionStart → start-services.sh → alert-notifier.py (background)
-PostToolUse  → send_event_otel.py → OTEL Collector → Prometheus
-PreCompact   → send_event_otel.py → OTEL Collector → Prometheus
-Stop         → send_event_otel.py → Session summary + cleanup
-```
+The plugin uses a Stop hook that runs when sessions end:
+
+1. **Stop hook** reads the session JSONL file
+2. Parses tool usage, outcomes, compactions, stages
+3. Writes summary JSON to `~/.claude/session-summaries/`
+4. Shows macOS notification with session stats
+
+The collector script can then aggregate these summaries for analysis.

@@ -15,9 +15,8 @@ You receive JSON data from `collect_usage.py --format json` containing:
 - **setup_profile**: Computed setup context (complexity, shape, red flags, coverage gaps)
 - **discovery**: All available skills, agents, commands, and hooks with descriptions
 - **sessions**: Recent user prompts
-- **stats**: Usage counts and potential matches
+- **stats**: Usage counts, outcomes (success/failure/interrupted), compactions, and potential matches
 - **claude_md**: Configuration file content
-- **prometheus**: Metrics and trends (if available)
 
 ## Improvement Categories
 

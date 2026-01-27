@@ -1,55 +1,15 @@
 {
   "name": "observability",
-  "version": "1.25.0",
-  "description": "Claude Code OTEL metrics, alerts, and session summaries. Tracks tool outcomes, workflow stages, and context efficiency.",
+  "version": "2.0.0",
+  "description": "Usage analysis from Claude Code session logs",
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/send_event_otel.py --event-type PreToolUse",
-            "timeout": 2
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/send_event_otel.py --event-type PostToolUse",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/send_event_otel.py --event-type PreCompact",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/send_event_otel.py --event-type Stop",
-            "timeout": 3
-          }
-        ]
-      }
-    ]
+    "Stop": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/generate_session_summary.py",
+        "timeout": 5000
+      }]
+    }]
   }
 }

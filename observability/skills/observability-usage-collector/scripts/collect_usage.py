@@ -1,14 +1,16 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["pyyaml", "requests"]
+# dependencies = ["pyyaml"]
 # ///
 """
 Usage Collector - Collect Claude Code usage data for analysis.
 
-Gathers data from two sources:
-1. Prometheus metrics - aggregates, trends, success rates
-2. JSONL session files - detailed context, exact prompts
+Gathers data from JSONL session files to provide:
+- Tool usage counts and patterns
+- Outcomes (success/failure/interrupted)
+- Compactions and context efficiency
+- Workflow stage detection
 
 Outputs structured data for interpretation by usage-insights-agent.
 This script performs DATA COLLECTION only - no analysis or recommendations.
@@ -24,8 +26,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
-
-import requests
 
 
 @dataclass
@@ -56,6 +56,11 @@ class SessionData:
     agents_used: set[str] = field(default_factory=set)
     tools_used: set[str] = field(default_factory=set)
     hooks_triggered: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    # New fields for outcomes and compactions
+    success_count: int = 0
+    failure_count: int = 0
+    interrupted_count: int = 0
+    compaction_count: int = 0
 
 
 @dataclass
@@ -64,19 +69,6 @@ class MissedOpportunity:
     session_id: str
     matched_item: SkillOrAgent
     matched_triggers: list[str]
-
-
-@dataclass
-class PrometheusData:
-    skill_usage: dict[str, float] = field(default_factory=dict)
-    agent_usage: dict[str, float] = field(default_factory=dict)
-    skill_trends: dict[str, float] = field(default_factory=dict)  # % change
-    agent_trends: dict[str, float] = field(default_factory=dict)
-    overall_success_rate: float = 0.0
-    skill_success_rates: dict[str, float] = field(default_factory=dict)
-    workflow_stages: dict[str, int] = field(default_factory=dict)
-    available: bool = False
-    error: Optional[str] = None
 
 
 @dataclass
@@ -338,135 +330,7 @@ def compute_plugin_usage(
 
 
 # =============================================================================
-# Prometheus Fetcher
-# =============================================================================
-
-def get_prometheus_endpoint() -> Optional[str]:
-    """Get Prometheus endpoint from global config."""
-    global_config = Path.home() / ".claude" / "observability" / "endpoint.env"
-    if global_config.exists():
-        for line in global_config.read_text().splitlines():
-            if line.startswith("PROMETHEUS_ENDPOINT="):
-                return line.split("=", 1)[1].strip()
-    return None
-
-
-def query_prometheus(endpoint: str, query: str, timeout: int = 5) -> Optional[dict]:
-    """Execute a PromQL query."""
-    try:
-        response = requests.get(
-            f"{endpoint}/api/v1/query",
-            params={"query": query},
-            timeout=timeout
-        )
-        if response.status_code == 200:
-            return response.json()
-    except requests.RequestException:
-        pass
-    return None
-
-
-def fetch_prometheus_data(endpoint: str, time_range: str = "7d") -> PrometheusData:
-    """Fetch all relevant metrics from Prometheus."""
-    data = PrometheusData()
-
-    # Test connection
-    test = query_prometheus(endpoint, "up", timeout=3)
-    if test is None:
-        data.error = f"Cannot connect to Prometheus at {endpoint}"
-        return data
-
-    data.available = True
-
-    # Skill usage (current period)
-    result = query_prometheus(
-        endpoint,
-        f'sum by (skill_name) (increase(claude_code_skill_invocations[{time_range}]))'
-    )
-    if result and result.get("data", {}).get("result"):
-        for item in result["data"]["result"]:
-            skill = item["metric"].get("skill_name", "unknown")
-            value = float(item["value"][1])
-            if value > 0:
-                data.skill_usage[skill] = value
-
-    # Agent usage (current period)
-    result = query_prometheus(
-        endpoint,
-        f'sum by (agent_type) (increase(claude_code_agent_invocations[{time_range}]))'
-    )
-    if result and result.get("data", {}).get("result"):
-        for item in result["data"]["result"]:
-            agent = item["metric"].get("agent_type", "unknown")
-            value = float(item["value"][1])
-            if value > 0:
-                data.agent_usage[agent] = value
-
-    # Skill trends (compare with previous period)
-    result = query_prometheus(
-        endpoint,
-        f'sum by (skill_name) (increase(claude_code_skill_invocations[{time_range}] offset {time_range}))'
-    )
-    if result and result.get("data", {}).get("result"):
-        prev_usage = {}
-        for item in result["data"]["result"]:
-            skill = item["metric"].get("skill_name", "unknown")
-            prev_usage[skill] = float(item["value"][1])
-
-        for skill, current in data.skill_usage.items():
-            prev = prev_usage.get(skill, 0)
-            if prev > 0:
-                data.skill_trends[skill] = ((current - prev) / prev) * 100
-            elif current > 0:
-                data.skill_trends[skill] = 100.0  # New usage
-
-    # Agent trends
-    result = query_prometheus(
-        endpoint,
-        f'sum by (agent_type) (increase(claude_code_agent_invocations[{time_range}] offset {time_range}))'
-    )
-    if result and result.get("data", {}).get("result"):
-        prev_usage = {}
-        for item in result["data"]["result"]:
-            agent = item["metric"].get("agent_type", "unknown")
-            prev_usage[agent] = float(item["value"][1])
-
-        for agent, current in data.agent_usage.items():
-            prev = prev_usage.get(agent, 0)
-            if prev > 0:
-                data.agent_trends[agent] = ((current - prev) / prev) * 100
-            elif current > 0:
-                data.agent_trends[agent] = 100.0
-
-    # Overall success rate
-    result = query_prometheus(
-        endpoint,
-        f'sum(increase(claude_code_outcome_success[{time_range}])) / '
-        f'(sum(increase(claude_code_outcome_success[{time_range}])) + '
-        f'sum(increase(claude_code_outcome_failure[{time_range}])))'
-    )
-    if result and result.get("data", {}).get("result"):
-        value = result["data"]["result"][0]["value"][1]
-        if value != "NaN":
-            data.overall_success_rate = float(value) * 100
-
-    # Workflow stages
-    result = query_prometheus(
-        endpoint,
-        f'sum by (to_stage) (increase(claude_code_workflow_stage_transition[{time_range}]))'
-    )
-    if result and result.get("data", {}).get("result"):
-        for item in result["data"]["result"]:
-            stage = item["metric"].get("to_stage", "unknown")
-            value = int(float(item["value"][1]))
-            if value > 0:
-                data.workflow_stages[stage] = value
-
-    return data
-
-
-# =============================================================================
-# JSONL Parser (existing, slightly modified)
+# JSONL Parser
 # =============================================================================
 
 def extract_yaml_frontmatter(content: str) -> dict:
@@ -852,6 +716,260 @@ def parse_claude_md_files(paths: list[Path]) -> dict:
     return result
 
 
+def _is_system_prompt(content: str) -> bool:
+    """Filter out system-generated prompts."""
+    if content.startswith("Base directory for this skill:"):
+        return True
+    if content.startswith("[TRACE-ID:"):
+        return True
+    if "<command-message>" in content or "<command-name>" in content:
+        return True
+    return False
+
+
+def detect_outcome(tool_name: str, result: str) -> str:
+    """Detect outcome from tool result content."""
+    result_lower = result.lower()
+
+    if tool_name == "Bash":
+        if "exit code: 0" in result_lower or "succeeded" in result_lower:
+            return "success"
+        if "exit code:" in result_lower:
+            return "failure"
+        if "timeout" in result_lower:
+            return "failure"
+        if any(kw in result_lower for kw in ["error:", "failed", "traceback", "permission denied"]):
+            return "failure"
+        return "success"
+
+    if tool_name in ("Edit", "Write", "NotebookEdit"):
+        if any(kw in result_lower for kw in ["permission denied", "file not found", "no such file",
+                                              "old_string not found", "not unique", "error"]):
+            return "failure"
+        return "success"
+
+    if "error" in result_lower or "failed" in result_lower:
+        return "failure"
+    return "success"
+
+
+def resolve_project_path(projects_dir: Path, project_path: str) -> tuple[Path | None, list[Path]]:
+    """Resolve project path to actual folder, with fuzzy matching.
+
+    Returns (resolved_path, matches) where:
+    - resolved_path is the single matching folder or None
+    - matches is list of all matching folders (for error reporting)
+    """
+    # Try exact match first (full path like /Users/foo/project)
+    project_folder = project_path.replace("/", "-")
+    project_dir = projects_dir / project_folder
+    if project_dir.exists():
+        return project_dir, [project_dir]
+
+    # Try fuzzy match: find folders ending with the project name
+    if not projects_dir.exists():
+        return None, []
+
+    matches = [
+        d for d in projects_dir.iterdir()
+        if d.is_dir() and d.name.endswith(f"-{project_path}")
+    ]
+
+    if len(matches) == 1:
+        return matches[0], matches
+    return None, matches
+
+
+def find_project_sessions(projects_dir: Path, project_dir: Path, max_sessions: int) -> list[Path]:
+    """Find session files for a project."""
+    if not project_dir.exists():
+        return []
+
+    session_files = sorted(
+        project_dir.glob("*.jsonl"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True
+    )
+
+    return session_files[:max_sessions]
+
+
+def parse_session_file(session_path: Path) -> SessionData:
+    """Parse a session JSONL file with outcome and compaction tracking."""
+    session_data = SessionData(session_id=session_path.stem[:8])
+    pending_tools: dict[str, str] = {}  # tool_use_id -> tool_name
+
+    try:
+        lines = session_path.read_text().strip().split("\n")
+
+        for line in lines:
+            try:
+                entry = json.loads(line)
+                entry_type = entry.get("type")
+
+                # Detect compactions
+                if entry_type == "system" and entry.get("subtype") == "compact_boundary":
+                    session_data.compaction_count += 1
+                    continue
+
+                if entry_type == "user":
+                    message = entry.get("message", {})
+                    content = message.get("content", "")
+
+                    # Check for interruptions and tool results
+                    if isinstance(content, str):
+                        if "[Request interrupted by user]" in content:
+                            session_data.interrupted_count += 1
+                        elif content.strip() and not _is_system_prompt(content):
+                            session_data.prompts.append(content)
+                    elif isinstance(content, list):
+                        for item in content:
+                            if isinstance(item, dict):
+                                item_type = item.get("type")
+                                if item_type == "text":
+                                    text = item.get("text", "")
+                                    if "[Request interrupted by user]" in text:
+                                        session_data.interrupted_count += 1
+                                    elif not _is_system_prompt(text):
+                                        session_data.prompts.append(text)
+                                elif item_type == "tool_result":
+                                    # Tool results are in user messages
+                                    tool_use_id = item.get("tool_use_id", "")
+                                    result = item.get("content", "")
+
+                                    # Get tool name and remove from pending
+                                    tool_name = pending_tools.pop(tool_use_id, "unknown")
+
+                                    if isinstance(result, str):
+                                        outcome = detect_outcome(tool_name, result)
+                                        if outcome == "success":
+                                            session_data.success_count += 1
+                                        else:
+                                            session_data.failure_count += 1
+
+                elif entry_type == "assistant":
+                    message = entry.get("message", {})
+                    content = message.get("content", [])
+
+                    if isinstance(content, list):
+                        for item in content:
+                            if isinstance(item, dict) and item.get("type") == "tool_use":
+                                tool_name = item.get("name", "")
+                                tool_use_id = item.get("id", "")
+                                tool_input = item.get("input", {})
+
+                                # Track pending tools
+                                if tool_use_id:
+                                    pending_tools[tool_use_id] = tool_name
+
+                                if tool_name == "Skill":
+                                    skill = tool_input.get("skill", "")
+                                    if skill:
+                                        session_data.skills_used.add(skill)
+
+                                elif tool_name == "Task":
+                                    agent = tool_input.get("subagent_type", "")
+                                    if agent:
+                                        session_data.agents_used.add(agent)
+
+                                else:
+                                    session_data.tools_used.add(tool_name)
+
+            except json.JSONDecodeError:
+                continue
+
+        # Remaining pending tools are interrupted
+        session_data.interrupted_count += len(pending_tools)
+
+    except Exception as e:
+        print(f"Warning: Could not parse {session_path}: {e}", file=sys.stderr)
+
+    return session_data
+
+
+def find_matches(prompt: str, items: list[SkillOrAgent], min_triggers: int = 2) -> list[tuple[SkillOrAgent, list[str]]]:
+    """Find skills/agents that match a prompt based on triggers."""
+    matches = []
+    prompt_lower = prompt.lower()
+
+    for item in items:
+        matched_triggers = []
+        for trigger in item.triggers:
+            trigger_lower = trigger.lower()
+            if len(trigger_lower) > 3:
+                if re.search(r'\b' + re.escape(trigger_lower) + r'\b', prompt_lower):
+                    matched_triggers.append(trigger)
+
+        name_matched = item.name.lower() in [t.lower() for t in matched_triggers]
+        if len(matched_triggers) >= min_triggers or name_matched:
+            matches.append((item, matched_triggers))
+
+    return matches
+
+
+def analyze_jsonl(
+    skills: list[SkillOrAgent],
+    agents: list[SkillOrAgent],
+    commands: list[SkillOrAgent],
+    sessions: list[SessionData],
+) -> tuple[list[MissedOpportunity], dict]:
+    """Analyze sessions for missed opportunities."""
+    missed = []
+    stats = {
+        "total_sessions": len(sessions),
+        "total_prompts": sum(len(s.prompts) for s in sessions),
+        "skills_used": defaultdict(int),
+        "agents_used": defaultdict(int),
+        "commands_used": defaultdict(int),
+        "missed_skills": defaultdict(int),
+        "missed_agents": defaultdict(int),
+        "missed_commands": defaultdict(int),
+        # New outcome stats
+        "total_success": sum(s.success_count for s in sessions),
+        "total_failure": sum(s.failure_count for s in sessions),
+        "total_interrupted": sum(s.interrupted_count for s in sessions),
+        "total_compactions": sum(s.compaction_count for s in sessions),
+    }
+
+    all_items = skills + agents + commands
+
+    for session in sessions:
+        for skill in session.skills_used:
+            stats["skills_used"][skill] += 1
+        for agent in session.agents_used:
+            stats["agents_used"][agent] += 1
+
+        for prompt in session.prompts:
+            matches = find_matches(prompt, all_items)
+
+            for item, triggers in matches:
+                was_used = False
+                if item.type == "skill" and item.name in session.skills_used:
+                    was_used = True
+                elif item.type == "agent" and item.name in session.agents_used:
+                    was_used = True
+                elif item.type == "command":
+                    # Commands are slash commands - check if /command was in the prompt
+                    was_used = f"/{item.name}" in prompt.lower()
+
+                if not was_used:
+                    missed.append(MissedOpportunity(
+                        prompt=prompt,
+                        session_id=session.session_id,
+                        matched_item=item,
+                        matched_triggers=triggers,
+                    ))
+
+                    if item.type == "skill":
+                        stats["missed_skills"][item.name] += 1
+                    elif item.type == "agent":
+                        stats["missed_agents"][item.name] += 1
+                    else:
+                        stats["missed_commands"][item.name] += 1
+
+    return missed, stats
+
+
 def generate_analysis_json(
     skills: list[SkillOrAgent],
     agents: list[SkillOrAgent],
@@ -860,21 +978,27 @@ def generate_analysis_json(
     sessions: list[SessionData],
     jsonl_stats: dict,
     claude_md: dict,
-    prom_data: PrometheusData,
     setup_profile: SetupProfile,
 ) -> dict:
     """Generate rich JSON output for agent interpretation."""
 
+    # Compute outcome stats
+    total_outcomes = jsonl_stats["total_success"] + jsonl_stats["total_failure"] + jsonl_stats["total_interrupted"]
+    success_rate = (jsonl_stats["total_success"] / total_outcomes * 100) if total_outcomes > 0 else 0
+
+    # Compute avg tools per compaction
+    total_tools = sum(len(s.tools_used) + len(s.skills_used) + len(s.agents_used) for s in sessions)
+    avg_tools_per_compaction = (total_tools / jsonl_stats["total_compactions"]) if jsonl_stats["total_compactions"] > 0 else 0
+
     return {
         "_schema": {
             "description": "Claude Code usage analysis data for agent interpretation",
-            "version": "2.1",
+            "version": "3.0",
             "sections": {
                 "discovery": "All available skills, agents, commands, and hooks discovered from global, project, and plugin sources",
                 "sessions": "Parsed session data showing what was actually used",
-                "stats": "Aggregated statistics on usage and missed opportunities",
+                "stats": "Aggregated statistics on usage, outcomes, and missed opportunities",
                 "claude_md": "Content and structure of CLAUDE.md configuration files",
-                "prometheus": "Metrics from Prometheus if available (trends, success rates)",
                 "setup_profile": "Computed setup profile with complexity, shape, red flags, and coverage gaps",
             },
         },
@@ -947,19 +1071,19 @@ def generate_analysis_json(
                 "agents": dict(jsonl_stats["missed_agents"]),
                 "commands": dict(jsonl_stats.get("missed_commands", {})),
             },
+            "outcomes": {
+                "success": jsonl_stats["total_success"],
+                "failure": jsonl_stats["total_failure"],
+                "interrupted": jsonl_stats["total_interrupted"],
+                "success_rate": round(success_rate, 1),
+            },
+            "compactions": {
+                "total": jsonl_stats["total_compactions"],
+                "avg_tools_per": round(avg_tools_per_compaction, 1),
+            },
         },
 
         "claude_md": claude_md,
-
-        "prometheus": {
-            "available": prom_data.available,
-            "skill_usage": prom_data.skill_usage,
-            "agent_usage": prom_data.agent_usage,
-            "skill_trends": prom_data.skill_trends,
-            "agent_trends": prom_data.agent_trends,
-            "workflow_stages": prom_data.workflow_stages,
-            "success_rate": prom_data.overall_success_rate,
-        } if prom_data.available else {"available": False},
 
         "setup_profile": {
             "complexity": setup_profile.complexity,
@@ -975,208 +1099,9 @@ def generate_analysis_json(
     }
 
 
-def _is_system_prompt(content: str) -> bool:
-    """Filter out system-generated prompts."""
-    if content.startswith("Base directory for this skill:"):
-        return True
-    if content.startswith("[TRACE-ID:"):
-        return True
-    if "<command-message>" in content or "<command-name>" in content:
-        return True
-    return False
-
-
-def resolve_project_path(projects_dir: Path, project_path: str) -> tuple[Path | None, list[Path]]:
-    """Resolve project path to actual folder, with fuzzy matching.
-
-    Returns (resolved_path, matches) where:
-    - resolved_path is the single matching folder or None
-    - matches is list of all matching folders (for error reporting)
-    """
-    # Try exact match first (full path like /Users/foo/project)
-    project_folder = project_path.replace("/", "-")
-    project_dir = projects_dir / project_folder
-    if project_dir.exists():
-        return project_dir, [project_dir]
-
-    # Try fuzzy match: find folders ending with the project name
-    if not projects_dir.exists():
-        return None, []
-
-    matches = [
-        d for d in projects_dir.iterdir()
-        if d.is_dir() and d.name.endswith(f"-{project_path}")
-    ]
-
-    if len(matches) == 1:
-        return matches[0], matches
-    return None, matches
-
-
-def find_project_sessions(projects_dir: Path, project_dir: Path, max_sessions: int) -> list[Path]:
-    """Find session files for a project."""
-    if not project_dir.exists():
-        return []
-
-    session_files = sorted(
-        project_dir.glob("*.jsonl"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True
-    )
-
-    return session_files[:max_sessions]
-
-
-def parse_session_file(session_path: Path) -> SessionData:
-    """Parse a session JSONL file."""
-    session_data = SessionData(session_id=session_path.stem[:8])
-
-    try:
-        lines = session_path.read_text().strip().split("\n")
-
-        for line in lines:
-            try:
-                entry = json.loads(line)
-                entry_type = entry.get("type")
-
-                if entry_type == "user":
-                    message = entry.get("message", {})
-                    content = message.get("content", "")
-
-                    if isinstance(content, str) and content.strip():
-                        if not _is_system_prompt(content):
-                            session_data.prompts.append(content)
-                    elif isinstance(content, list):
-                        for item in content:
-                            if isinstance(item, dict) and item.get("type") == "text":
-                                text = item.get("text", "")
-                                if not _is_system_prompt(text):
-                                    session_data.prompts.append(text)
-
-                elif entry_type == "assistant":
-                    message = entry.get("message", {})
-                    content = message.get("content", [])
-
-                    if isinstance(content, list):
-                        for item in content:
-                            if isinstance(item, dict) and item.get("type") == "tool_use":
-                                tool_name = item.get("name", "")
-                                tool_input = item.get("input", {})
-
-                                if tool_name == "Skill":
-                                    skill = tool_input.get("skill", "")
-                                    if skill:
-                                        session_data.skills_used.add(skill)
-
-                                elif tool_name == "Task":
-                                    agent = tool_input.get("subagent_type", "")
-                                    if agent:
-                                        session_data.agents_used.add(agent)
-
-                                else:
-                                    session_data.tools_used.add(tool_name)
-
-            except json.JSONDecodeError:
-                continue
-
-    except Exception as e:
-        print(f"Warning: Could not parse {session_path}: {e}", file=sys.stderr)
-
-    return session_data
-
-
-def find_matches(prompt: str, items: list[SkillOrAgent], min_triggers: int = 2) -> list[tuple[SkillOrAgent, list[str]]]:
-    """Find skills/agents that match a prompt based on triggers."""
-    matches = []
-    prompt_lower = prompt.lower()
-
-    for item in items:
-        matched_triggers = []
-        for trigger in item.triggers:
-            trigger_lower = trigger.lower()
-            if len(trigger_lower) > 3:
-                if re.search(r'\b' + re.escape(trigger_lower) + r'\b', prompt_lower):
-                    matched_triggers.append(trigger)
-
-        name_matched = item.name.lower() in [t.lower() for t in matched_triggers]
-        if len(matched_triggers) >= min_triggers or name_matched:
-            matches.append((item, matched_triggers))
-
-    return matches
-
-
-def analyze_jsonl(
-    skills: list[SkillOrAgent],
-    agents: list[SkillOrAgent],
-    commands: list[SkillOrAgent],
-    sessions: list[SessionData],
-) -> tuple[list[MissedOpportunity], dict]:
-    """Analyze sessions for missed opportunities."""
-    missed = []
-    stats = {
-        "total_sessions": len(sessions),
-        "total_prompts": sum(len(s.prompts) for s in sessions),
-        "skills_used": defaultdict(int),
-        "agents_used": defaultdict(int),
-        "commands_used": defaultdict(int),
-        "missed_skills": defaultdict(int),
-        "missed_agents": defaultdict(int),
-        "missed_commands": defaultdict(int),
-    }
-
-    all_items = skills + agents + commands
-
-    for session in sessions:
-        for skill in session.skills_used:
-            stats["skills_used"][skill] += 1
-        for agent in session.agents_used:
-            stats["agents_used"][agent] += 1
-
-        for prompt in session.prompts:
-            matches = find_matches(prompt, all_items)
-
-            for item, triggers in matches:
-                was_used = False
-                if item.type == "skill" and item.name in session.skills_used:
-                    was_used = True
-                elif item.type == "agent" and item.name in session.agents_used:
-                    was_used = True
-                elif item.type == "command":
-                    # Commands are slash commands - check if /command was in the prompt
-                    was_used = f"/{item.name}" in prompt.lower()
-
-                if not was_used:
-                    missed.append(MissedOpportunity(
-                        prompt=prompt,
-                        session_id=session.session_id,
-                        matched_item=item,
-                        matched_triggers=triggers,
-                    ))
-
-                    if item.type == "skill":
-                        stats["missed_skills"][item.name] += 1
-                    elif item.type == "agent":
-                        stats["missed_agents"][item.name] += 1
-                    else:
-                        stats["missed_commands"][item.name] += 1
-
-    return missed, stats
-
-
-
-
 # =============================================================================
 # Output Formatters
 # =============================================================================
-
-def trend_arrow(value: float) -> str:
-    """Return trend arrow based on percentage change."""
-    if value > 10:
-        return "↑"
-    elif value < -10:
-        return "↓"
-    return "↔"
-
 
 def progress_bar(value: float, max_value: float, width: int = 10) -> str:
     """Create ASCII progress bar."""
@@ -1187,7 +1112,6 @@ def progress_bar(value: float, max_value: float, width: int = 10) -> str:
 
 
 def print_table(
-    prom_data: PrometheusData,
     jsonl_stats: dict,
     missed: list[MissedOpportunity],
     verbose: bool,
@@ -1195,52 +1119,27 @@ def print_table(
     """Print collected data as formatted table."""
     print("\n" + "=" * 80)
     print("USAGE DATA COLLECTED")
-    if prom_data.available:
-        print("(with Prometheus metrics)")
-    else:
-        print("(JSONL only - Prometheus unavailable)")
     print("=" * 80)
 
     print(f"\nSessions analyzed: {jsonl_stats['total_sessions']}")
     print(f"Prompts analyzed: {jsonl_stats['total_prompts']}")
     print(f"Potential matches found: {len(missed)}")
 
-    if prom_data.available:
-        print(f"Overall success rate: {prom_data.overall_success_rate:.1f}%")
-
-    # Prometheus data section
-    if prom_data.available and (prom_data.skill_usage or prom_data.agent_usage):
-        print("\n📊 PROMETHEUS DATA (vs previous period)")
-
-        if prom_data.skill_usage:
-            print("\n  Skills:")
-            for skill, count in sorted(prom_data.skill_usage.items(), key=lambda x: -x[1])[:8]:
-                trend = prom_data.skill_trends.get(skill, 0)
-                arrow = trend_arrow(trend)
-                trend_str = f"{trend:+.0f}%" if trend != 0 else ""
-                print(f"    {skill:25} {count:4.0f} {arrow} {trend_str}")
-
-        if prom_data.agent_usage:
-            print("\n  Agents:")
-            for agent, count in sorted(prom_data.agent_usage.items(), key=lambda x: -x[1])[:8]:
-                trend = prom_data.agent_trends.get(agent, 0)
-                arrow = trend_arrow(trend)
-                trend_str = f"{trend:+.0f}%" if trend != 0 else ""
-                print(f"    {agent:25} {count:4.0f} {arrow} {trend_str}")
-
-        if prom_data.workflow_stages:
-            print("\n📋 WORKFLOW STAGES")
-            for stage, count in sorted(prom_data.workflow_stages.items(), key=lambda x: -x[1]):
-                print(f"    {stage:15} {count:4}")
+    # Outcome stats
+    total = jsonl_stats["total_success"] + jsonl_stats["total_failure"] + jsonl_stats["total_interrupted"]
+    if total > 0:
+        success_rate = jsonl_stats["total_success"] / total * 100
+        print(f"\nOutcomes: ✓{jsonl_stats['total_success']} ✗{jsonl_stats['total_failure']} ⏹{jsonl_stats['total_interrupted']} ({success_rate:.1f}% success)")
+        print(f"Compactions: {jsonl_stats['total_compactions']}")
 
     # JSONL usage stats
     if jsonl_stats["skills_used"]:
-        print("\n--- Skills Used (from JSONL) ---")
+        print("\n--- Skills Used ---")
         for skill, count in sorted(jsonl_stats["skills_used"].items(), key=lambda x: -x[1]):
             print(f"  {skill}: {count}")
 
     if jsonl_stats["agents_used"]:
-        print("\n--- Agents Used (from JSONL) ---")
+        print("\n--- Agents Used ---")
         for agent, count in sorted(jsonl_stats["agents_used"].items(), key=lambda x: -x[1]):
             print(f"  {agent}: {count}")
 
@@ -1263,60 +1162,22 @@ def print_table(
     print("=" * 80)
 
 
-def print_dashboard(
-    prom_data: PrometheusData,
-    jsonl_stats: dict,
-):
+def print_dashboard(jsonl_stats: dict):
     """Print dashboard-style output with ASCII charts."""
     print("\n┌" + "─" * 78 + "┐")
     print("│" + " USAGE DATA DASHBOARD ".center(78) + "│")
     print("└" + "─" * 78 + "┘")
 
-    # Two-column layout
-    if prom_data.available:
-        # Skills column
-        print("\n┌─ Skills " + "─" * 27 + "┐  ┌─ Success Rate " + "─" * 20 + "┐")
-
-        max_skill = max(prom_data.skill_usage.values()) if prom_data.skill_usage else 1
-        skill_lines = []
-        for skill, count in sorted(prom_data.skill_usage.items(), key=lambda x: -x[1])[:5]:
-            trend = prom_data.skill_trends.get(skill, 0)
-            arrow = trend_arrow(trend)
-            bar = progress_bar(count, max_skill, 8)
-            skill_lines.append(f"│ {skill[:15]:15} {bar} {count:3.0f} {arrow} │")
-
-        # Success rate column
-        success_lines = [
-            f"│ Overall:  {progress_bar(prom_data.overall_success_rate, 100, 10)} {prom_data.overall_success_rate:5.1f}% │",
-        ]
-
-        # Pad to same length
-        while len(skill_lines) < 5:
-            skill_lines.append("│" + " " * 36 + "│")
-        while len(success_lines) < 5:
-            success_lines.append("│" + " " * 36 + "│")
-
-        for s, r in zip(skill_lines, success_lines):
-            print(f"{s}  {r}")
-
-        print("└" + "─" * 36 + "┘  └" + "─" * 36 + "┘")
-
-        # Workflow stages
-        if prom_data.workflow_stages:
-            print("\n┌─ Workflow Stages " + "─" * 58 + "┐")
-            stages = ["brainstorm", "plan", "implement", "test", "review", "commit"]
-            stage_str = ""
-            for stage in stages:
-                count = prom_data.workflow_stages.get(stage, 0)
-                if count > 0:
-                    stage_str += f" {stage}({count}) →"
-                else:
-                    stage_str += f" [{stage}] →"
-            print(f"│ {stage_str[:-2]:74} │")
-            print("└" + "─" * 76 + "┘")
-    else:
-        print("\n⚠ Prometheus unavailable - showing JSONL data only")
-        print(f"\n  Sessions: {jsonl_stats['total_sessions']} | Prompts: {jsonl_stats['total_prompts']}")
+    # Outcome stats
+    total = jsonl_stats["total_success"] + jsonl_stats["total_failure"] + jsonl_stats["total_interrupted"]
+    if total > 0:
+        success_rate = jsonl_stats["total_success"] / total * 100
+        print("\n┌─ Outcomes " + "─" * 65 + "┐")
+        print(f"│ Success:     {progress_bar(jsonl_stats['total_success'], total, 20)} {jsonl_stats['total_success']:4} ({success_rate:.1f}%)          │")
+        print(f"│ Failure:     {progress_bar(jsonl_stats['total_failure'], total, 20)} {jsonl_stats['total_failure']:4}                      │")
+        print(f"│ Interrupted: {progress_bar(jsonl_stats['total_interrupted'], total, 20)} {jsonl_stats['total_interrupted']:4}                      │")
+        print(f"│ Compactions: {jsonl_stats['total_compactions']:4}                                                    │")
+        print("└" + "─" * 76 + "┘")
 
     # Summary
     print("\n┌─ Summary " + "─" * 66 + "┐")
@@ -1326,10 +1187,8 @@ def print_dashboard(
     print()
 
 
-
-
 # =============================================================================
-# Quick Stats (existing, uses session summaries)
+# Quick Stats (uses session summaries)
 # =============================================================================
 
 def analyze_session_summaries(summary_dir: Path, days: int = 14) -> dict:
@@ -1432,9 +1291,6 @@ def main():
     parser.add_argument("--project", help="Project path (default: current directory)")
     parser.add_argument("--quick-stats", action="store_true", help="Show quick stats from session summaries")
     parser.add_argument("--days", type=int, default=14, help="Days to include in quick stats (default: 14)")
-    parser.add_argument("--no-prometheus", action="store_true", help="Skip Prometheus even if available")
-    parser.add_argument("--prometheus-endpoint", help="Override Prometheus endpoint")
-    parser.add_argument("--range", choices=["7d", "14d", "30d"], default="7d", help="Time range for Prometheus queries")
     args = parser.parse_args()
 
     home = Path.home()
@@ -1451,38 +1307,18 @@ def main():
     projects_dir = home / ".claude" / "projects"
 
     # Resolve project path early to get actual source directory
-    # When using --project widget-service, resolve to /Users/.../widget-service
     if args.project and not Path(args.project).is_absolute():
-        # Fuzzy match: find the session folder, then derive source path
         resolved_dir, matches = resolve_project_path(projects_dir, project_path)
         if resolved_dir:
-            # Convert session folder name back to source path
-            # e.g., "-Users-bartoszglowacki-Projects-widget-service" -> "/Users/bartoszglowacki/Projects/widget-service"
             target_project_dir = Path("/" + resolved_dir.name.replace("-", "/"))
             if not target_project_dir.exists():
-                # Fallback: try common patterns
                 target_project_dir = home / "Projects" / project_path
         else:
             target_project_dir = cwd
     else:
         target_project_dir = Path(project_path) if project_path != str(cwd) else cwd
 
-    print("\n[1/5] Fetching Prometheus metrics...", file=sys.stderr)
-    prom_data = PrometheusData()
-    if not args.no_prometheus:
-        endpoint = args.prometheus_endpoint or get_prometheus_endpoint()
-        if endpoint:
-            prom_data = fetch_prometheus_data(endpoint, args.range)
-            if prom_data.available:
-                print(f"  ✓ Connected to {endpoint}", file=sys.stderr)
-            else:
-                print(f"  ✗ Failed: {prom_data.error}", file=sys.stderr)
-        else:
-            print("  ⊘ Skipped (no endpoint configured)", file=sys.stderr)
-    else:
-        print("  ⊘ Skipped (--no-prometheus)", file=sys.stderr)
-
-    print("\n[2/5] Discovering skills, agents, commands, hooks...", file=sys.stderr)
+    print("\n[1/4] Discovering skills, agents, commands, hooks...", file=sys.stderr)
     skill_paths = [home / ".claude" / "skills", target_project_dir / ".claude" / "skills"]
     agent_paths = [home / ".claude" / "agents", target_project_dir / ".claude" / "agents"]
     command_paths = [home / ".claude" / "commands", target_project_dir / ".claude" / "commands"]
@@ -1506,7 +1342,7 @@ def main():
 
     print(f"  ✓ Found {len(skills)} skills, {len(agents)} agents, {len(commands)} commands, {len(hooks)} hooks", file=sys.stderr)
 
-    print("\n[3/5] Parsing CLAUDE.md files...", file=sys.stderr)
+    print("\n[2/4] Parsing CLAUDE.md files...", file=sys.stderr)
     claude_md_paths = [
         home / ".claude" / "CLAUDE.md",
         target_project_dir / "CLAUDE.md",
@@ -1521,23 +1357,18 @@ def main():
     setup_profile = compute_setup_profile(skills, agents, commands, hooks, claude_md)
     print(f"  ✓ Setup: {setup_profile.complexity} complexity, {len(setup_profile.red_flags)} red flags", file=sys.stderr)
 
-    print("\n[4/5] Parsing session files...", file=sys.stderr)
+    print("\n[3/4] Parsing session files...", file=sys.stderr)
 
-    # Resolve project path for sessions (reuse projects_dir from earlier)
-    # For fuzzy matches, we already resolved earlier; for full paths, resolve now
     if args.project and not Path(args.project).is_absolute():
-        # Already resolved earlier - reuse
         resolved_dir, matches = resolve_project_path(projects_dir, project_path)
     else:
         resolved_dir, matches = resolve_project_path(projects_dir, project_path)
 
     if resolved_dir:
         if resolved_dir.name != project_path.replace("/", "-"):
-            # Fuzzy match found - show which project we're using
             print(f"  → Matched: {resolved_dir.name}", file=sys.stderr)
         session_files = find_project_sessions(projects_dir, resolved_dir, args.sessions)
     elif len(matches) > 1:
-        # Multiple fuzzy matches - ask user to be more specific
         print(f"  ✗ Multiple projects match '{project_path}':", file=sys.stderr)
         for m in matches[:5]:
             print(f"    - {m.name}", file=sys.stderr)
@@ -1546,9 +1377,7 @@ def main():
         print("  Use full path or more specific name", file=sys.stderr)
         session_files = []
     else:
-        # No matches at all
         print(f"  ✗ No project found matching '{project_path}'", file=sys.stderr)
-        # List available projects as hint
         if projects_dir.exists():
             available = sorted([d.name for d in projects_dir.iterdir() if d.is_dir()])[:5]
             if available:
@@ -1566,17 +1395,17 @@ def main():
         if resolved_dir:
             print(f"  ✗ No sessions found in {resolved_dir.name}", file=sys.stderr)
 
-    print("\n[5/5] Finding potential matches...", file=sys.stderr)
+    print("\n[4/4] Finding potential matches...", file=sys.stderr)
     missed, jsonl_stats = analyze_jsonl(skills, agents, commands, sessions)
     print(f"  ✓ Found {len(missed)} potential matches", file=sys.stderr)
 
-    # Read plugin enabled states from settings (project overrides global)
+    # Read plugin enabled states from settings
     enabled_states = read_plugin_enabled_states(
         home / ".claude" / "settings.json",
         target_project_dir / ".claude" / "settings.json",
     )
 
-    # Compute plugin usage after we have session data and matches
+    # Compute plugin usage
     setup_profile.plugin_usage = compute_plugin_usage(skills, agents, sessions, missed, enabled_states)
     active_count = len(setup_profile.plugin_usage["active"])
     unused_count = len(setup_profile.plugin_usage["unused"])
@@ -1594,13 +1423,13 @@ def main():
     # Output
     if args.format == "json":
         output = generate_analysis_json(
-            skills, agents, commands, hooks, sessions, jsonl_stats, claude_md, prom_data, setup_profile
+            skills, agents, commands, hooks, sessions, jsonl_stats, claude_md, setup_profile
         )
         print(json.dumps(output, indent=2))
     elif args.format == "dashboard":
-        print_dashboard(prom_data, jsonl_stats)
+        print_dashboard(jsonl_stats)
     else:
-        print_table(prom_data, jsonl_stats, missed, args.verbose)
+        print_table(jsonl_stats, missed, args.verbose)
 
 
 if __name__ == "__main__":
