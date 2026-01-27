@@ -50,7 +50,12 @@ def get_session_file(session_id: str, cwd: str) -> Path | None:
 
 
 def detect_outcome(tool_name: str, result: str) -> str:
-    """Detect outcome from tool result content."""
+    """Detect outcome from tool result content.
+
+    NOTE: This function is intentionally duplicated in collect_usage.py.
+    Both scripts use 'uv run --script' for standalone operation without dependencies.
+    Keep implementations in sync when making changes (ADR-003).
+    """
     result_lower = result.lower()
 
     if tool_name == "Bash":
@@ -129,7 +134,8 @@ def parse_session_file(session_path: Path) -> dict:
 
     try:
         lines = session_path.read_text().strip().split("\n")
-    except Exception:
+    except Exception as e:
+        print(f"ERROR: Failed to read {session_path}: {e}", file=sys.stderr)
         return stats
 
     for line in lines:
@@ -252,7 +258,8 @@ def generate_summary(session_id: str, cwd: str, stats: dict) -> dict:
 def main():
     try:
         input_data = json.load(sys.stdin)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        print(f"ERROR: Invalid JSON on stdin: {e}", file=sys.stderr)
         sys.exit(0)
 
     session_id = input_data.get("session_id", "")

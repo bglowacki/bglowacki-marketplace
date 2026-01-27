@@ -10,7 +10,7 @@
     {
       "name": "observability",
       "source": "./observability",
-      "description": "OTEL metrics, alerts, and session summaries for Claude Code"
+      "description": "Usage analysis from Claude Code session logs"
     }
   ]
 }

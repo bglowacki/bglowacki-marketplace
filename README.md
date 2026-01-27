@@ -16,107 +16,55 @@ claude plugins install observability@bglowacki-marketplace
 
 ### observability
 
-OTEL metrics, alerts, and session summaries for Claude Code.
+Usage analysis from Claude Code session logs.
 
 **Features:**
-- Tracks tool outcomes (success/failure)
-- Workflow stage inference (brainstorm → plan → implement → test → review → commit)
-- Context efficiency (compaction metrics)
-- Session summaries with macOS notifications
-- Prometheus alerts for workflow issues
+- Generates session summaries saved to `~/.claude/session-summaries/`
+- Tracks tool outcomes (success/failure/interrupted)
+- Monitors workflow stages (brainstorm → plan → implement → test → review → commit)
+- Analyzes skill/agent usage patterns
+- Context efficiency tracking (compaction metrics)
+- macOS notifications on session end
 
-#### Prerequisites
+**No external dependencies** - works with Claude Code's built-in JSONL session logs.
 
-- Kubernetes cluster (OrbStack recommended)
-- `kubectl` configured
-- `helm` installed
-- `uv` package manager
+#### Usage
 
-#### Setup
+The plugin works automatically via a Stop hook. For detailed analysis:
 
-1. **Deploy the observability stack:**
+| Skill | Description |
+|-------|-------------|
+| `/observability-usage-collector` | Collect session data for analysis |
+| `/observability-workflow-optimizer` | Suggest improvements based on usage analysis |
 
-```
-/observability-setup
-```
-
-This deploys and configures everything:
-- OTEL Collector (receives metrics)
-- Prometheus alerts (4 workflow alerts)
-- Alertmanager config (routes to local webhook)
-- Endpoint configuration (no manual env vars needed)
-
-2. **Restart Claude Code** to load the plugin hooks.
-
-> **Note:** `CLAUDE_CODE_ENABLE_TELEMETRY` is **not required** and can cause exit hangs. This plugin uses its own metrics pipeline.
-
-#### How It Works
-
-The plugin is inactive until you run `/setup-observability`. This creates a config file that enables the hooks.
-
-**Hooks:**
-- `PostToolUse` - Tracks every tool invocation with outcome detection
-- `PreCompact` - Tracks context compaction events
-- `Stop` - Generates session summary with macOS notification
-- `SessionStart` - Starts alert webhook server
-
-**Session summaries** are saved to `~/.claude/session-summaries/`
-
-#### Alerts
-
-| Alert | Trigger |
-|-------|---------|
-| ClaudeCodeRepeatedFailures | 3+ failures in 5 minutes |
-| ClaudeCodeStuckInImplementation | 10+ implement stages without test/commit |
-| ClaudeCodeContextChurn | 5+ compactions in 1 hour |
-| ClaudeCodeEditFailures | 2+ Edit failures in 10 minutes |
-
-#### Troubleshooting
-
-**Exit hangs:**
-- If `CLAUDE_CODE_ENABLE_TELEMETRY` is set to `"1"`, set it to `"0"` (not needed for this plugin)
-- Ensure OTEL collector is running: `kubectl get pods -n observability`
-
-**No metrics:**
-- Verify `/setup-observability` was run
-- Check endpoint config exists: `ls ~/.claude/plugins/cache/bglowacki-marketplace/observability/*/config/endpoint.env`
-
-**No alerts:**
-- Check alert-notifier is running: `pgrep -f alert-notifier`
-- Check logs: `cat /tmp/alert-notifier.log`
-
-#### Health Check
-
-Run the health check to verify all components:
+#### Quick Stats
 
 ```bash
-./observability/scripts/check-health.sh
+uv run observability/skills/observability-usage-collector/scripts/collect_usage.py --quick-stats --days 14
 ```
 
-#### Additional Skills
+#### Full Analysis Pipeline
 
-**Usage Analyzer** - Analyze session patterns and identify missed skill/agent opportunities:
-
+1. **Collect data:**
+```bash
+uv run observability/skills/observability-usage-collector/scripts/collect_usage.py --format json --sessions 20 > /tmp/usage-data.json
 ```
-/observability-usage-analyzer
+
+2. **Analyze with agent:**
+```
+Analyze this usage data in /tmp/usage-data.json
 ```
 
-Options: `--sessions N`, `--format table|dashboard|json`, `--quick-stats`
-
-**Workflow Optimizer** - Suggests improvements to skills and workflows based on usage analysis:
-
+3. **Optimize workflow:**
 ```
 /observability-workflow-optimizer
 ```
 
-Run after usage-analyzer to get actionable improvement recommendations.
+#### Data Locations
 
-#### Uninstall
+- Session JSONL files: `~/.claude/projects/{project}/*.jsonl`
+- Session summaries: `~/.claude/session-summaries/{date}_{session_id}.json`
 
-Remove the entire observability stack:
+## License
 
-```
-/observability-uninstall
-```
-
-This removes OTEL Collector, Prometheus, Grafana, cert-manager, and all related namespaces.
+MIT

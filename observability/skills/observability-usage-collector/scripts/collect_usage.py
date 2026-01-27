@@ -27,6 +27,20 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+# Constants (ADR-009: Extract magic numbers)
+MAX_DESCRIPTION_LENGTH = 200
+MAX_TOOL_INPUT_LENGTH = 100
+MAX_PROMPT_LENGTH = 500
+DEFAULT_SESSIONS = 10
+DEFAULT_DAYS = 14
+
+# Path constants (ADR-020: Centralize Path.home())
+HOME = Path.home()
+CLAUDE_DIR = HOME / ".claude"
+PROJECTS_DIR = CLAUDE_DIR / "projects"
+SUMMARIES_DIR = CLAUDE_DIR / "session-summaries"
+PLUGINS_CACHE = CLAUDE_DIR / "plugins" / "cache"
+
 
 @dataclass
 class SkillOrAgent:
@@ -142,7 +156,7 @@ def compute_setup_profile(
 
     # Red flags
     red_flags = []
-    global_claude_dir = str(Path.home() / ".claude")
+    global_claude_dir = str(CLAUDE_DIR)
     project_claude_md = [f for f in claude_md.get("files_found", []) if "CLAUDE.md" in f and ".claude" not in f and not f.startswith(global_claude_dir)]
     if not project_claude_md:
         red_flags.append("No project-level CLAUDE.md")
@@ -342,7 +356,7 @@ def compute_plugin_usage(
 # JSONL Parser
 # =============================================================================
 
-def extract_yaml_frontmatter(content: str) -> dict:
+def extract_yaml_frontmatter(content: str, source_path: str = "") -> dict:
     """Extract YAML frontmatter from markdown content."""
     import yaml
 
@@ -355,7 +369,9 @@ def extract_yaml_frontmatter(content: str) -> dict:
 
     try:
         return yaml.safe_load(parts[1]) or {}
-    except yaml.YAMLError:
+    except yaml.YAMLError as e:
+        if source_path:
+            print(f"Warning: Invalid YAML frontmatter in {source_path}: {e}", file=sys.stderr)
         return {}
 
 
@@ -385,7 +401,7 @@ def extract_triggers_from_description(description: str) -> list[str]:
 def discover_skills(paths: list[Path]) -> list[SkillOrAgent]:
     """Discover skills from given paths."""
     skills = []
-    global_claude_dir = str(Path.home() / ".claude")
+    global_claude_dir = str(CLAUDE_DIR)
     for base_path in paths:
         if not base_path.exists():
             continue
@@ -402,7 +418,7 @@ def discover_skills(paths: list[Path]) -> list[SkillOrAgent]:
 
             try:
                 content = skill_md.read_text()
-                frontmatter = extract_yaml_frontmatter(content)
+                frontmatter = extract_yaml_frontmatter(content, str(skill_md))
 
                 name = frontmatter.get("name", skill_dir.name)
                 description = frontmatter.get("description", "")
@@ -426,7 +442,7 @@ def discover_skills(paths: list[Path]) -> list[SkillOrAgent]:
 def discover_agents(paths: list[Path]) -> list[SkillOrAgent]:
     """Discover agents from given paths."""
     agents = []
-    global_claude_dir = str(Path.home() / ".claude")
+    global_claude_dir = str(CLAUDE_DIR)
     for base_path in paths:
         if not base_path.exists():
             continue
@@ -436,7 +452,7 @@ def discover_agents(paths: list[Path]) -> list[SkillOrAgent]:
         for agent_file in base_path.glob("*.md"):
             try:
                 content = agent_file.read_text()
-                frontmatter = extract_yaml_frontmatter(content)
+                frontmatter = extract_yaml_frontmatter(content, str(agent_file))
 
                 name = frontmatter.get("name", agent_file.stem)
                 description = frontmatter.get("description", "")
@@ -457,7 +473,7 @@ def discover_agents(paths: list[Path]) -> list[SkillOrAgent]:
                 agents.append(SkillOrAgent(
                     name=name,
                     type="agent",
-                    description=description[:200],
+                    description=description[:MAX_DESCRIPTION_LENGTH],
                     triggers=triggers,
                     source_path=str(agent_file),
                     source_type=source_type,
@@ -471,7 +487,7 @@ def discover_agents(paths: list[Path]) -> list[SkillOrAgent]:
 def discover_commands(paths: list[Path]) -> list[SkillOrAgent]:
     """Discover commands from given paths."""
     commands = []
-    global_claude_dir = str(Path.home() / ".claude")
+    global_claude_dir = str(CLAUDE_DIR)
 
     for base_path in paths:
         if not base_path.exists():
@@ -482,7 +498,7 @@ def discover_commands(paths: list[Path]) -> list[SkillOrAgent]:
         for cmd_file in base_path.glob("*.md"):
             try:
                 content = cmd_file.read_text()
-                frontmatter = extract_yaml_frontmatter(content)
+                frontmatter = extract_yaml_frontmatter(content, str(cmd_file))
                 name = frontmatter.get("name", cmd_file.stem)
                 description = frontmatter.get("description", "")
                 triggers = extract_triggers_from_description(description)
@@ -492,7 +508,7 @@ def discover_commands(paths: list[Path]) -> list[SkillOrAgent]:
                 commands.append(SkillOrAgent(
                     name=name,
                     type="command",
-                    description=description[:200],
+                    description=description[:MAX_DESCRIPTION_LENGTH],
                     triggers=triggers,
                     source_path=str(cmd_file),
                     source_type=source_type,
@@ -533,7 +549,7 @@ def discover_from_plugins(plugins_cache: Path) -> tuple[list[SkillOrAgent], list
                         skill_md = skill_dir / "SKILL.md"
                         try:
                             content = skill_md.read_text()
-                            frontmatter = extract_yaml_frontmatter(content)
+                            frontmatter = extract_yaml_frontmatter(content, str(skill_md))
                             name = frontmatter.get("name", skill_dir.name)
                             triggers = extract_triggers_from_description(frontmatter.get("description", ""))
                             triggers.append(name.lower())
@@ -554,14 +570,14 @@ def discover_from_plugins(plugins_cache: Path) -> tuple[list[SkillOrAgent], list
                 for agent_file in agents_path.glob("*.md"):
                     try:
                         content = agent_file.read_text()
-                        frontmatter = extract_yaml_frontmatter(content)
+                        frontmatter = extract_yaml_frontmatter(content, str(agent_file))
                         name = frontmatter.get("name", agent_file.stem)
                         triggers = extract_triggers_from_description(frontmatter.get("description", ""))
                         triggers.append(name.lower())
                         agents.append(SkillOrAgent(
                             name=name,
                             type="agent",
-                            description=frontmatter.get("description", "")[:200],
+                            description=frontmatter.get("description", "")[:MAX_DESCRIPTION_LENGTH],
                             triggers=triggers,
                             source_path=str(agent_file),
                             source_type=source_type,
@@ -575,7 +591,7 @@ def discover_from_plugins(plugins_cache: Path) -> tuple[list[SkillOrAgent], list
                 for cmd_file in commands_path.glob("*.md"):
                     try:
                         content = cmd_file.read_text()
-                        frontmatter = extract_yaml_frontmatter(content)
+                        frontmatter = extract_yaml_frontmatter(content, str(cmd_file))
                         name = frontmatter.get("name", cmd_file.stem)
                         triggers = extract_triggers_from_description(frontmatter.get("description", ""))
                         triggers.append(name.lower())
@@ -583,7 +599,7 @@ def discover_from_plugins(plugins_cache: Path) -> tuple[list[SkillOrAgent], list
                         commands.append(SkillOrAgent(
                             name=name,
                             type="command",
-                            description=frontmatter.get("description", "")[:200],
+                            description=frontmatter.get("description", "")[:MAX_DESCRIPTION_LENGTH],
                             triggers=triggers,
                             source_path=str(cmd_file),
                             source_type=source_type,
@@ -740,26 +756,31 @@ def _summarize_tool_input(tool_name: str, tool_input: dict) -> str:
     """Extract meaningful context from tool input."""
     if tool_name == "Bash":
         cmd = tool_input.get("command", "")
-        return cmd[:100] if cmd else ""
+        return cmd[:MAX_TOOL_INPUT_LENGTH] if cmd else ""
     if tool_name in ("Edit", "Write", "Read"):
-        return tool_input.get("file_path", "")[:100]
+        return tool_input.get("file_path", "")[:MAX_TOOL_INPUT_LENGTH]
     if tool_name == "Skill":
         return tool_input.get("skill", "")
     if tool_name == "Task":
         agent = tool_input.get("subagent_type", "")
         desc = tool_input.get("description", "")
-        return f"{agent}: {desc}"[:100] if desc else agent
+        return f"{agent}: {desc}"[:MAX_TOOL_INPUT_LENGTH] if desc else agent
     if tool_name == "Grep":
         pattern = tool_input.get("pattern", "")
-        return f"pattern: {pattern}"[:100]
+        return f"pattern: {pattern}"[:MAX_TOOL_INPUT_LENGTH]
     if tool_name == "Glob":
         pattern = tool_input.get("pattern", "")
-        return f"glob: {pattern}"[:100]
-    return str(tool_input)[:100]
+        return f"glob: {pattern}"[:MAX_TOOL_INPUT_LENGTH]
+    return str(tool_input)[:MAX_TOOL_INPUT_LENGTH]
 
 
 def detect_outcome(tool_name: str, result: str) -> str:
-    """Detect outcome from tool result content."""
+    """Detect outcome from tool result content.
+
+    NOTE: This function is intentionally duplicated in generate_session_summary.py.
+    Both scripts use 'uv run --script' for standalone operation without dependencies.
+    Keep implementations in sync when making changes (ADR-003).
+    """
     result_lower = result.lower()
 
     if tool_name == "Bash":
@@ -900,7 +921,7 @@ def parse_session_file(session_path: Path) -> SessionData:
                             session_data.interrupted_tools.append(InterruptedTool(
                                 tool_name=tool_name,
                                 tool_input=tool_input,
-                                followup_message=user_text[:500],  # Limit length
+                                followup_message=user_text[:MAX_PROMPT_LENGTH],  # Limit length
                             ))
                         awaiting_followup.clear()
 
@@ -1098,7 +1119,7 @@ def generate_analysis_json(
                 {
                     "event_type": h.event_type,
                     "matcher": h.matcher,
-                    "command": h.command[:100],
+                    "command": h.command[:MAX_TOOL_INPUT_LENGTH],
                     "source": h.source_type,
                 }
                 for h in hooks
@@ -1116,7 +1137,7 @@ def generate_analysis_json(
             "prompts": [
                 {
                     "session_id": s.session_id,
-                    "text": p[:500],
+                    "text": p[:MAX_PROMPT_LENGTH],
                 }
                 for s in sessions
                 for p in s.prompts[:5]
@@ -1357,66 +1378,62 @@ def print_quick_stats(stats: dict, days: int):
 
 def main():
     parser = argparse.ArgumentParser(description="Collect Claude Code usage data for analysis")
-    parser.add_argument("--sessions", type=int, default=10, help="Sessions to analyze")
+    parser.add_argument("--sessions", type=int, default=DEFAULT_SESSIONS, help=f"Sessions to analyze (default: {DEFAULT_SESSIONS})")
     parser.add_argument("--format", choices=["table", "dashboard", "json"], default="table")
     parser.add_argument("--verbose", action="store_true", help="Show examples")
     parser.add_argument("--project", help="Project path (default: current directory)")
     parser.add_argument("--quick-stats", action="store_true", help="Show quick stats from session summaries")
-    parser.add_argument("--days", type=int, default=14, help="Days to include in quick stats (default: 14)")
+    parser.add_argument("--days", type=int, default=DEFAULT_DAYS, help=f"Days to include in quick stats (default: {DEFAULT_DAYS})")
     args = parser.parse_args()
 
-    home = Path.home()
     cwd = Path.cwd()
 
     # Quick stats mode
     if args.quick_stats:
-        summary_dir = home / ".claude" / "session-summaries"
-        stats = analyze_session_summaries(summary_dir, args.days)
+        stats = analyze_session_summaries(SUMMARIES_DIR, args.days)
         print_quick_stats(stats, args.days)
         return
 
     project_path = args.project or str(cwd)
-    projects_dir = home / ".claude" / "projects"
 
     # Resolve project path early to get actual source directory
     if args.project and not Path(args.project).is_absolute():
-        resolved_dir, matches = resolve_project_path(projects_dir, project_path)
+        resolved_dir, matches = resolve_project_path(PROJECTS_DIR, project_path)
         if resolved_dir:
             target_project_dir = Path("/" + resolved_dir.name.replace("-", "/"))
             if not target_project_dir.exists():
-                target_project_dir = home / "Projects" / project_path
+                target_project_dir = HOME / "Projects" / project_path
         else:
             target_project_dir = cwd
     else:
         target_project_dir = Path(project_path) if project_path != str(cwd) else cwd
 
     print("\n[1/4] Discovering skills, agents, commands, hooks...", file=sys.stderr)
-    skill_paths = [home / ".claude" / "skills", target_project_dir / ".claude" / "skills"]
-    agent_paths = [home / ".claude" / "agents", target_project_dir / ".claude" / "agents"]
-    command_paths = [home / ".claude" / "commands", target_project_dir / ".claude" / "commands"]
-    plugins_cache = home / ".claude" / "plugins" / "cache"
+    skill_paths = [CLAUDE_DIR / "skills", target_project_dir / ".claude" / "skills"]
+    agent_paths = [CLAUDE_DIR / "agents", target_project_dir / ".claude" / "agents"]
+    command_paths = [CLAUDE_DIR / "commands", target_project_dir / ".claude" / "commands"]
 
     skills = discover_skills(skill_paths)
     agents = discover_agents(agent_paths)
     commands = discover_commands(command_paths)
 
-    plugin_skills, plugin_agents, plugin_commands = discover_from_plugins(plugins_cache)
+    plugin_skills, plugin_agents, plugin_commands = discover_from_plugins(PLUGINS_CACHE)
     skills.extend(plugin_skills)
     agents.extend(plugin_agents)
     commands.extend(plugin_commands)
 
     settings_paths = [
-        (home / ".claude" / "settings.json", "global"),
+        (CLAUDE_DIR / "settings.json", "global"),
         (target_project_dir / ".claude" / "settings.json", "project"),
         (target_project_dir / ".claude" / "settings.local.json", "project-local"),
     ]
-    hooks = discover_hooks(settings_paths, plugins_cache)
+    hooks = discover_hooks(settings_paths, PLUGINS_CACHE)
 
     print(f"  ✓ Found {len(skills)} skills, {len(agents)} agents, {len(commands)} commands, {len(hooks)} hooks", file=sys.stderr)
 
     print("\n[2/4] Parsing CLAUDE.md files...", file=sys.stderr)
     claude_md_paths = [
-        home / ".claude" / "CLAUDE.md",
+        CLAUDE_DIR / "CLAUDE.md",
         target_project_dir / "CLAUDE.md",
         target_project_dir / ".claude" / "instructions.md",
     ]
@@ -1473,7 +1490,7 @@ def main():
 
     # Read plugin enabled states from settings
     enabled_states = read_plugin_enabled_states(
-        home / ".claude" / "settings.json",
+        CLAUDE_DIR / "settings.json",
         target_project_dir / ".claude" / "settings.json",
     )
 

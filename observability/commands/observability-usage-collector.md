@@ -28,7 +28,6 @@ Then use the usage-insights-agent to interpret `/tmp/usage-data.json`.
 
 - `--sessions N` - Number of sessions to analyze (default: 10)
 - `--project PATH` - Analyze specific project
-- `--no-prometheus` - Skip Prometheus metrics
 - `--format json` - Output JSON for agent interpretation (required for pipeline)
 
 ## Pipeline
@@ -41,7 +40,7 @@ Then use the usage-insights-agent to interpret `/tmp/usage-data.json`.
 
 ```bash
 # Collect usage data
-uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-collector/scripts/collect_usage.py --format json --sessions 20 --no-prometheus > /tmp/usage-data.json
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/observability-usage-collector/scripts/collect_usage.py --format json --sessions 20 > /tmp/usage-data.json
 
 # Then ask: "Analyze the usage data in /tmp/usage-data.json and give me insights"
 # After insights: "Now help me optimize my workflow based on these insights"

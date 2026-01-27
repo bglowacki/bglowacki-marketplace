@@ -1,6 +1,6 @@
 {
   "name": "observability",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Usage analysis from Claude Code session logs",
   "hooks": {
     "Stop": [{
@@ -8,7 +8,7 @@
       "hooks": [{
         "type": "command",
         "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/generate_session_summary.py",
-        "timeout": 5000
+        "timeout": 10000
       }]
     }]
   }

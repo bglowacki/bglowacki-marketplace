@@ -11,3 +11,6 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# Local settings (user-specific)
+*.local.json
