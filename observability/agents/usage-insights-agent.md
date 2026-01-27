@@ -2,7 +2,7 @@
 name: usage-insights-agent
 description: Analyzes Claude Code usage data to identify patterns, missed opportunities, and configuration issues. Use after running usage-collector with JSON output. Triggers on "analyze usage data", "interpret usage", "what am I missing", or when usage JSON is provided.
 model: opus
-tools: Read, Bash
+tools: Read, Bash, mcp__context7__resolve-library-id, mcp__context7__query-docs
 ---
 
 # Usage Insights Agent
@@ -29,6 +29,7 @@ Group all findings into these 5 categories:
 | **Hook Automation** | `hook_automation` | Missing project hooks, global→project hook moves, automation gaps |
 | **Configuration** | `configuration` | Missing project CLAUDE.md, stale references, workflow contradictions |
 | **Cleanup** | `cleanup` | Never-used components, redundant items, disabled-but-present items |
+| **Best Practices** | `best_practices` | CLAUDE.md structure, description quality, hook patterns vs official docs |
 
 ### Priority Calculation
 
@@ -296,3 +297,64 @@ This ensures:
 - Plugin-dev issues don't appear for widget-service
 - Already-disabled plugins aren't recommended for disabling again
 - Potentially useful disabled plugins are surfaced
+
+## Best Practices Validation
+
+This category validates the user's setup against official Claude Code documentation.
+
+### Step 1: Check Context7 Availability
+
+Try to resolve the Claude Code library:
+```
+mcp__context7__resolve-library-id(libraryName="claude-code", query="Claude Code CLI documentation")
+```
+
+If successful, use Context7 for detailed recommendations. If tool unavailable or error, use hardcoded fallback.
+
+### Step 2: Detection Conditions
+
+| Check | Detection Logic | Context7 Query |
+|-------|-----------------|----------------|
+| CLAUDE.md missing | No project-level file in `claude_md.files_found` | "CLAUDE.md file purpose and recommended structure" |
+| CLAUDE.md sparse | Content < 500 chars or < 3 `##` sections | "CLAUDE.md recommended sections and content" |
+| Empty descriptions | Skill/agent description < 50 chars | "effective skill and agent descriptions" |
+| Missing triggers | Description has no quoted phrases or "trigger" keyword | "skill trigger phrases best practices" |
+| Hook no timeout | Hook in `discovery.hooks` missing `timeout` | "hook timeout configuration" |
+| Large timeout | Hook `timeout` > 30000ms | "hook performance and timeout guidelines" |
+
+### Step 3: Fetch Docs On-Demand
+
+Only query Context7 when you detect a potential issue:
+```
+mcp__context7__query-docs(libraryId="{resolved_id}", query="{relevant query from table above}")
+```
+
+### Step 4: Output Format
+
+```markdown
+### {Issue Type} (e.g., "CLAUDE.md Structure")
+
+**Why this matters:** {practical explanation of impact}
+
+**From docs:** {quote from Context7 response, or "Using built-in guidelines" if fallback}
+
+| Issue | Your Setup | Recommendation |
+|-------|------------|----------------|
+| {specific issue} | {what user has} | {what to do} |
+
+**Example fix:**
+{concrete example}
+```
+
+### Hardcoded Fallback (if no Context7)
+
+If Context7 MCP is unavailable, use these built-in guidelines:
+
+| Check | Fallback Recommendation |
+|-------|------------------------|
+| CLAUDE.md missing | "Create CLAUDE.md with: ## Project Context, ## Code Style, ## Testing Commands" |
+| CLAUDE.md sparse | "Add sections for project context, code conventions, and how to run tests" |
+| Empty description | "Add description with trigger phrases in quotes, e.g., 'Use when user asks to debug'" |
+| Hook no timeout | "Add timeout field (recommended: 5000-30000ms depending on operation)" |
+
+Note in output: "Install Context7 MCP for detailed best practices from official Claude Code docs."
