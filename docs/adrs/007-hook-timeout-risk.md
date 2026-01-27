@@ -1,7 +1,7 @@
 # ADR-007: Review Stop Hook Timeout
 
 ## Status
-PROPOSED
+IMPLEMENTED (2026-01-27)
 
 ## Context
 The Stop hook in `plugin.json` has a 5000ms timeout:
@@ -32,7 +32,7 @@ If timeout occurs:
 - No error feedback to user
 
 ## Decision
-TBD - Needs review
+ACCEPTED - Implemented Option A. Timeout increased to 10000ms in plugin.json.
 
 ## Options
 

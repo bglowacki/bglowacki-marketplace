@@ -1,7 +1,7 @@
 # ADR-002: Update Root README.md
 
 ## Status
-PROPOSED
+IMPLEMENTED (2026-01-27)
 
 ## Context
 The root README.md extensively documents OTEL, Prometheus, Alertmanager, and Kubernetes features that were removed in the v2.0.0 refactor. The observability/README.md was updated but the root README was not.
@@ -17,7 +17,7 @@ The root README.md extensively documents OTEL, Prometheus, Alertmanager, and Kub
 6. Health check script reference may be stale
 
 ## Decision
-TBD - Needs review
+ACCEPTED - Already implemented. README no longer references OTEL/Prometheus. Current content accurately describes JSONL-based architecture.
 
 ## Recommendation
 Replace the observability section with content from `observability/README.md` which accurately describes the current JSONL-based architecture.

@@ -1,7 +1,7 @@
 # ADR-006: Add Test Coverage
 
 ## Status
-PROPOSED
+IMPLEMENTED (2026-01-27)
 
 ## Context
 The observability plugin has no visible test files. Key logic that should be tested:
@@ -20,7 +20,10 @@ The observability plugin has no visible test files. Key logic that should be tes
 - Edge cases in JSONL parsing may cause silent failures
 
 ## Decision
-TBD - Needs review
+ACCEPTED - Implemented. Test suite added in `observability/tests/`:
+- `test_outcome_detection.py` - 8.5KB
+- `test_session_parsing.py` - 12.9KB
+- `test_workflow_stages.py` - 9.1KB
 
 ## Recommendation
 Add pytest test suite covering:

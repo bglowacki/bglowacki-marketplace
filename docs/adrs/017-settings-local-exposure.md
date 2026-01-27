@@ -1,7 +1,7 @@
 # ADR-017: Review settings.local.json Exposure
 
 ## Status
-PROPOSED
+IMPLEMENTED (2026-01-27)
 
 ## Context
 The `.claude/settings.local.json` file contains permission grants:
@@ -32,7 +32,7 @@ Issues:
 3. The `superpowers:brainstorming` skill reference is user-specific
 
 ## Decision
-TBD - Needs review
+ACCEPTED - Implemented Option A. Pattern `*.local.json` added to .gitignore.
 
 ## Options
 

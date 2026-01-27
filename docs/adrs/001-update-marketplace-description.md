@@ -1,7 +1,7 @@
 # ADR-001: Update Marketplace Description
 
 ## Status
-PROPOSED
+IMPLEMENTED (2026-01-27)
 
 ## Context
 The marketplace.json file at `.claude-plugin/marketplace.json` describes the observability plugin as "OTEL metrics, alerts, and session summaries for Claude Code". However, the plugin was refactored to use JSONL-only architecture in v2.0.0, removing OTEL and Prometheus dependencies.
@@ -12,7 +12,7 @@ The marketplace.json file at `.claude-plugin/marketplace.json` describes the obs
 **Expected**: Description should reflect JSONL-based session analysis
 
 ## Decision
-TBD - Needs review
+ACCEPTED - Already implemented. Current description is "Usage analysis from Claude Code session logs".
 
 ## Recommendation
 Update description to: "Session analysis and usage insights from Claude Code JSONL logs"
