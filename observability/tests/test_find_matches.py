@@ -187,12 +187,11 @@ class TestNameMatching:
 
     def test_name_in_triggers_counts(self, sample_agent):
         """If name matches a trigger, it should help with matching."""
-        # code-reviewer has "review" as trigger
-        prompt = "please review my code"
+        # code-reviewer has "review" and "pull request" as triggers
+        prompt = "please review my pull request"
         matches = find_matches(prompt, [sample_agent])
 
-        # "review" and "code" might both match
-        # Actually "code review" is a trigger (2 words)
+        # "review" and "pull request" both match (2 triggers)
         assert len(matches) == 1
 
 

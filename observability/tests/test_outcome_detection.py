@@ -44,7 +44,7 @@ class TestBashOutcomes:
         assert detect_outcome("Bash", result) == "success"
 
     def test_timeout_failure(self, detect_outcome):
-        result = "Command timed out after 30 seconds"
+        result = "Command timeout after 30 seconds"
         assert detect_outcome("Bash", result) == "failure"
 
     def test_error_keyword_failure(self, detect_outcome):

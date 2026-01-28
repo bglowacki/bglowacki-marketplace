@@ -124,7 +124,7 @@ class TestTaskStages:
         assert result == "test"
 
     def test_other_agent_keeps_current(self):
-        result = infer_workflow_stage("Task", {"subagent_type": "explorer"}, "implement")
+        result = infer_workflow_stage("Task", {"subagent_type": "general-purpose"}, "implement")
         assert result == "implement"
 
 
@@ -156,9 +156,9 @@ class TestStageTransitions:
         stage = infer_workflow_stage("Skill", {"skill": "writing-plans"}, stage)
         assert stage == "plan"
 
-        # Read some files (stays in plan)
+        # Read some files (transitions to research per ADR-011)
         stage = infer_workflow_stage("Read", {"file_path": "src/main.py"}, stage)
-        assert stage == "plan"
+        assert stage == "research"
 
         # Start implementing
         stage = infer_workflow_stage("Edit", {"file_path": "src/main.py"}, stage)
