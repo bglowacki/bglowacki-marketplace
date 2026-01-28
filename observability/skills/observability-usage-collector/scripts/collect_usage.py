@@ -2284,14 +2284,14 @@ def main():
     print("\n[3/4] Parsing session files...", file=sys.stderr)
 
     if args.project and not Path(args.project).is_absolute():
-        resolved_dir, matches = resolve_project_path(projects_dir, project_path)
+        resolved_dir, matches = resolve_project_path(PROJECTS_DIR, project_path)
     else:
-        resolved_dir, matches = resolve_project_path(projects_dir, project_path)
+        resolved_dir, matches = resolve_project_path(PROJECTS_DIR, project_path)
 
     if resolved_dir:
         if resolved_dir.name != project_path.replace("/", "-"):
             print(f"  → Matched: {resolved_dir.name}", file=sys.stderr)
-        session_files = find_project_sessions(projects_dir, resolved_dir, args.sessions)
+        session_files = find_project_sessions(PROJECTS_DIR, resolved_dir, args.sessions)
     elif len(matches) > 1:
         print(f"  ✗ Multiple projects match '{project_path}':", file=sys.stderr)
         for m in matches[:5]:
@@ -2302,8 +2302,8 @@ def main():
         session_files = []
     else:
         print(f"  ✗ No project found matching '{project_path}'", file=sys.stderr)
-        if projects_dir.exists():
-            available = sorted([d.name for d in projects_dir.iterdir() if d.is_dir()])[:5]
+        if PROJECTS_DIR.exists():
+            available = sorted([d.name for d in PROJECTS_DIR.iterdir() if d.is_dir()])[:5]
             if available:
                 print("  Available projects:", file=sys.stderr)
                 for p in available:
