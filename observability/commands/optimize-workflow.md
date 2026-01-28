@@ -1,6 +1,6 @@
 ---
-name: observability-workflow-optimizer
-description: Suggest improvements to skills, agents, and workflows based on usage analysis
+name: optimize-workflow
+description: Suggest improvements to skills, agents, and workflows based on usage analysis. Shortcut for the observability-workflow-optimizer skill.
 allowed-tools:
   - Bash
   - Read

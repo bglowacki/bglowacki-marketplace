@@ -1,6 +1,6 @@
 ---
-name: observability-usage-collector
-description: Collect Claude Code usage data for analysis
+name: collect-usage
+description: Collect Claude Code usage data for analysis. Shortcut for the observability-usage-collector skill.
 allowed-tools:
   - Bash
   - Read
