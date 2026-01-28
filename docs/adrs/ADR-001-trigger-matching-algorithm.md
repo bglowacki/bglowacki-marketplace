@@ -1,6 +1,6 @@
 # ADR-001: Trigger Matching Algorithm Improvements
 
-**Status:** ACCEPTED (REVISED after Deep Research)
+**Status:** IMPLEMENTED
 **Date:** 2026-01-27
 **Revised:** 2026-01-27
 **Category:** Methodology

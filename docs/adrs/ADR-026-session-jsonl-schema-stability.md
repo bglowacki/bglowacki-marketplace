@@ -1,6 +1,6 @@
 # ADR-026: Session JSONL Schema Stability
 
-**Status:** ACCEPTED (STRENGTHENED after Deep Research)
+**Status:** IMPLEMENTED
 **Date:** 2026-01-27
 **Revised:** 2026-01-27
 **Category:** Risk

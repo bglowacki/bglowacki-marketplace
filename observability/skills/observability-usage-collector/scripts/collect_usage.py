@@ -33,6 +33,15 @@ MAX_TOOL_INPUT_LENGTH = 100
 MAX_PROMPT_LENGTH = 500
 DEFAULT_SESSIONS = 10
 DEFAULT_DAYS = 14
+MIN_TRIGGER_LENGTH = 3  # ADR-001: Unified trigger length threshold
+MIN_PARSE_SUCCESS_RATE = 0.80  # ADR-026: Fail if <80% entries parse
+
+# Common word blocklist for trigger matching (ADR-001)
+COMMON_WORD_BLOCKLIST = frozenset({
+    "the", "for", "and", "but", "add", "run", "fix", "use", "new", "old",
+    "get", "set", "put", "can", "has", "was", "are", "not", "all", "any",
+    "now", "see", "try", "how", "why", "who", "its", "out", "two", "way",
+})
 
 # Path constants (ADR-020: Centralize Path.home())
 HOME = Path.home()
@@ -40,6 +49,59 @@ CLAUDE_DIR = HOME / ".claude"
 PROJECTS_DIR = CLAUDE_DIR / "projects"
 SUMMARIES_DIR = CLAUDE_DIR / "session-summaries"
 PLUGINS_CACHE = CLAUDE_DIR / "plugins" / "cache"
+
+
+@dataclass
+class SchemaFingerprint:
+    """ADR-026: Schema characteristics for detecting JSONL format changes."""
+    has_message_field: bool
+    content_types: set[str]  # {"str", "list", etc.}
+    entry_types: set[str]  # {"user", "assistant", "system"}
+
+
+# Expected JSONL schema fingerprint (ADR-026)
+EXPECTED_FINGERPRINT = SchemaFingerprint(
+    has_message_field=True,
+    content_types={"str", "list"},
+    entry_types={"user", "assistant", "system"},
+)
+
+
+def detect_schema_fingerprint(entries: list[dict]) -> SchemaFingerprint:
+    """ADR-026: Sample entries and detect schema characteristics."""
+    has_message = False
+    content_types: set[str] = set()
+    entry_types: set[str] = set()
+
+    for entry in entries:
+        if "message" in entry:
+            has_message = True
+        entry_type = entry.get("type")
+        if entry_type:
+            entry_types.add(entry_type)
+        content = entry.get("message", {}).get("content")
+        if content is not None:
+            content_types.add(type(content).__name__)
+
+    return SchemaFingerprint(
+        has_message_field=has_message,
+        content_types=content_types,
+        entry_types=entry_types,
+    )
+
+
+def compare_schema_fingerprint(actual: SchemaFingerprint) -> list[str]:
+    """ADR-026: Return list of schema differences from expected."""
+    differences = []
+    if not actual.has_message_field and EXPECTED_FINGERPRINT.has_message_field:
+        differences.append("'message' field missing from entries")
+    new_types = actual.entry_types - EXPECTED_FINGERPRINT.entry_types
+    if new_types:
+        differences.append(f"New entry types: {new_types}")
+    missing_types = EXPECTED_FINGERPRINT.entry_types - actual.entry_types
+    if missing_types:
+        differences.append(f"Missing entry types: {missing_types}")
+    return differences
 
 
 @dataclass
@@ -84,6 +146,10 @@ class SessionData:
     compaction_count: int = 0
     # Interrupted tools with context
     interrupted_tools: list[InterruptedTool] = field(default_factory=list)
+    # Parse statistics (ADR-026)
+    entries_total: int = 0
+    entries_parsed: int = 0
+    parsing_errors: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -170,12 +236,12 @@ def compute_setup_profile(
     if empty_desc_count > 0:
         red_flags.append(f"{empty_desc_count} components with empty descriptions")
 
-    # Find overlapping triggers
+    # Find overlapping triggers (ADR-001: use consistent threshold)
     trigger_map: dict[str, list[str]] = defaultdict(list)
     for item in skills + agents:
         for trigger in item.triggers:
             trigger_lower = trigger.lower()
-            if len(trigger_lower) > 4:  # Skip short triggers
+            if len(trigger_lower) >= MIN_TRIGGER_LENGTH:  # ADR-001: Unified threshold
                 trigger_map[trigger_lower].append(f"{item.type}:{item.name}")
 
     overlapping = []
@@ -851,17 +917,22 @@ def find_project_sessions(projects_dir: Path, project_dir: Path, max_sessions: i
 
 
 def parse_session_file(session_path: Path) -> SessionData:
-    """Parse a session JSONL file with outcome and compaction tracking."""
+    """Parse a session JSONL file with outcome and compaction tracking.
+
+    ADR-026: Tracks parse success rate and warns if schema may have changed.
+    """
     session_data = SessionData(session_id=session_path.stem[:8])
     pending_tools: dict[str, tuple[str, dict]] = {}  # tool_use_id -> (tool_name, tool_input)
     awaiting_followup: list[tuple[str, dict]] = []  # Tools that were interrupted, waiting for next user message
 
     try:
         lines = session_path.read_text().strip().split("\n")
+        session_data.entries_total = len(lines)
 
-        for line in lines:
+        for line_num, line in enumerate(lines, 1):
             try:
                 entry = json.loads(line)
+                session_data.entries_parsed += 1
                 entry_type = entry.get("type")
 
                 # Detect compactions
@@ -957,7 +1028,8 @@ def parse_session_file(session_path: Path) -> SessionData:
                                 else:
                                     session_data.tools_used.add(tool_name)
 
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                session_data.parsing_errors.append({"line": line_num, "error": str(e)})
                 continue
 
         # Remaining pending tools at session end are interrupted (no followup available)
@@ -972,11 +1044,27 @@ def parse_session_file(session_path: Path) -> SessionData:
     except Exception as e:
         print(f"Warning: Could not parse {session_path}: {e}", file=sys.stderr)
 
+    # ADR-026: Check parse success rate and warn if below threshold
+    if session_data.entries_total > 0:
+        success_rate = session_data.entries_parsed / session_data.entries_total
+        if success_rate < MIN_PARSE_SUCCESS_RATE:
+            print(
+                f"WARNING: Parse success rate {success_rate:.1%} below {MIN_PARSE_SUCCESS_RATE:.0%} "
+                f"for {session_path.name}. JSONL schema may have changed. See ADR-026.",
+                file=sys.stderr
+            )
+
     return session_data
 
 
 def find_matches(prompt: str, items: list[SkillOrAgent], min_triggers: int = 2) -> list[tuple[SkillOrAgent, list[str]]]:
-    """Find skills/agents that match a prompt based on triggers."""
+    """Find skills/agents that match a prompt based on triggers.
+
+    ADR-001 improvements:
+    - Unified threshold (>= 3 chars)
+    - 3-char triggers require UPPERCASE (e.g., TDD, API, DDD)
+    - Common words are blocked from matching
+    """
     matches = []
     prompt_lower = prompt.lower()
 
@@ -984,9 +1072,26 @@ def find_matches(prompt: str, items: list[SkillOrAgent], min_triggers: int = 2) 
         matched_triggers = []
         for trigger in item.triggers:
             trigger_lower = trigger.lower()
-            if len(trigger_lower) > 3:
-                if re.search(r'\b' + re.escape(trigger_lower) + r'\b', prompt_lower):
-                    matched_triggers.append(trigger)
+
+            # Skip triggers below minimum length
+            if len(trigger_lower) < MIN_TRIGGER_LENGTH:
+                continue
+
+            # 3-char triggers: require UPPERCASE in original (ADR-001)
+            # This allows TDD, API, DDD but not "the", "for", etc.
+            if len(trigger_lower) == 3:
+                if not trigger.isupper():
+                    continue
+                if trigger_lower in COMMON_WORD_BLOCKLIST:
+                    continue
+
+            # 4-char triggers: skip common words
+            if len(trigger_lower) == 4 and trigger_lower in COMMON_WORD_BLOCKLIST:
+                continue
+
+            # Match using word boundaries
+            if re.search(r'\b' + re.escape(trigger_lower) + r'\b', prompt_lower):
+                matched_triggers.append(trigger)
 
         name_matched = item.name.lower() in [t.lower() for t in matched_triggers]
         if len(matched_triggers) >= min_triggers or name_matched:
@@ -1078,16 +1183,31 @@ def generate_analysis_json(
     total_tools = sum(len(s.tools_used) + len(s.skills_used) + len(s.agents_used) for s in sessions)
     avg_tools_per_compaction = (total_tools / jsonl_stats["total_compactions"]) if jsonl_stats["total_compactions"] > 0 else 0
 
+    # ADR-026: Compute schema health metadata
+    entries_total = sum(s.entries_total for s in sessions)
+    entries_parsed = sum(s.entries_parsed for s in sessions)
+    parsing_errors_count = sum(len(s.parsing_errors) for s in sessions)
+    parse_success_rate = entries_parsed / entries_total if entries_total > 0 else 1.0
+
     return {
         "_schema": {
             "description": "Claude Code usage analysis data for agent interpretation",
-            "version": "3.1",
+            "version": "3.2",
             "sections": {
                 "discovery": "All available skills, agents, commands, and hooks discovered from global, project, and plugin sources",
                 "sessions": "Parsed session data showing what was actually used",
                 "stats": "Aggregated statistics on usage, outcomes, interruptions with followup context, and missed opportunities",
                 "claude_md": "Content and structure of CLAUDE.md configuration files",
                 "setup_profile": "Computed setup profile with complexity, shape, red flags, and coverage gaps",
+            },
+            # ADR-026: Schema health metadata
+            "jsonl_parse_stats": {
+                "entries_total": entries_total,
+                "entries_parsed": entries_parsed,
+                "parsing_errors_count": parsing_errors_count,
+                "parse_success_rate": round(parse_success_rate, 3),
+                "min_threshold": MIN_PARSE_SUCCESS_RATE,
+                "healthy": parse_success_rate >= MIN_PARSE_SUCCESS_RATE,
             },
         },
 
