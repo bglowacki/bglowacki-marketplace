@@ -21,6 +21,7 @@ import json
 import os
 import re
 import sys
+import hashlib
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -185,6 +186,275 @@ class SessionData:
     entries_total: int = 0
     entries_parsed: int = 0
     parsing_errors: list[dict] = field(default_factory=list)
+    # ADR-047: Temporal tracking
+    session_date: Optional[datetime] = None
+    recency_weight: float = 1.0  # 0.0-1.0 based on age
+
+
+# ADR-047: Temporal weighting constants
+RECENCY_HALF_LIFE_DAYS = 7  # Weight halves every 7 days
+
+# ADR-048: Feedback storage
+FEEDBACK_FILE = CLAUDE_DIR / "observability-feedback.json"
+
+# ADR-049: Alert fatigue prevention
+MAX_FINDINGS_PER_CATEGORY = 5
+MAX_TOTAL_FINDINGS = 15
+MAX_FINDINGS_DETAILED = 30  # For detailed JSON output
+
+# ADR-050: Statistical significance thresholds
+MIN_SESSIONS_FOR_PATTERN = 5  # Need at least 5 sessions for pattern detection
+MIN_OCCURRENCES_FOR_SIGNIFICANCE = 3  # Need at least 3 occurrences to report
+
+
+def compute_pre_computed_findings(
+    skills: list,
+    agents: list,
+    commands: list,
+    sessions: list,
+    missed: list,
+    setup_profile,
+) -> dict:
+    """ADR-054: Pre-compute deterministic findings that don't need LLM.
+
+    These findings are 100% certain (no inference needed) and should be
+    trusted directly without LLM re-verification.
+    """
+    # Empty descriptions (< 30 chars)
+    empty_descriptions = []
+    for item_list, item_type in [(skills, "skill"), (agents, "agent"), (commands, "command")]:
+        for item in item_list:
+            if len(item.description) < 30:
+                empty_descriptions.append({
+                    "name": item.name,
+                    "type": item_type,
+                    "source": item.source_type,
+                    "description_length": len(item.description),
+                })
+
+    # Never-used components (from skills/agents that have 0 usage)
+    used_skills = set()
+    used_agents = set()
+    for s in sessions:
+        used_skills.update(s.skills_used)
+        used_agents.update(s.agents_used)
+
+    never_used = []
+    for skill in skills:
+        if skill.name not in used_skills:
+            never_used.append({"name": skill.name, "type": "skill", "source": skill.source_type})
+    for agent in agents:
+        if agent.name not in used_agents:
+            never_used.append({"name": agent.name, "type": "agent", "source": agent.source_type})
+
+    # Name collisions (skill and command with same name)
+    skill_names = {s.name.lower() for s in skills}
+    command_names = {c.name.lower() for c in commands}
+    name_collisions = list(skill_names & command_names)
+
+    # Exact trigger matches that weren't used (high confidence missed opportunities)
+    exact_matches = []
+    for m in missed:
+        if m.matched_item.name.lower() in [t.lower() for t in m.matched_triggers]:
+            exact_matches.append({
+                "component": m.matched_item.name,
+                "type": m.matched_item.type,
+                "prompt_preview": m.prompt[:80],
+                "finding_hash": m.finding_hash,
+            })
+
+    return {
+        "_note": "Deterministic findings - 100% certain, no LLM inference needed",
+        "empty_descriptions": empty_descriptions[:20],  # Limit
+        "never_used": never_used[:20],  # Limit
+        "name_collisions": name_collisions,
+        "exact_trigger_matches": exact_matches[:20],  # Limit
+        # Reference existing pre-computed data
+        "overlapping_triggers_count": len(setup_profile.overlapping_triggers),
+        "description_quality_issues": sum(1 for d in setup_profile.description_quality if d.get("needs_improvement")),
+        "counts": {
+            "empty_descriptions": len(empty_descriptions),
+            "never_used": len(never_used),
+            "name_collisions": len(name_collisions),
+            "exact_matches": len(exact_matches),
+        },
+    }
+
+
+def compute_quality_metrics(
+    sessions: list,
+    missed: list,
+    feedback: dict,
+) -> dict:
+    """ADR-053: Compute analysis quality metrics for self-evaluation."""
+    session_count = len(sessions)
+    prompt_count = sum(len(s.prompts) for s in sessions)
+    finding_count = len(missed)
+
+    # Finding rate: findings per session (target: 0.5-2.0)
+    finding_rate = finding_count / session_count if session_count > 0 else 0
+
+    # High confidence rate: % of findings with confidence >= 0.7 (target: > 60%)
+    high_conf = sum(1 for m in missed if m.confidence >= 0.7)
+    high_conf_rate = high_conf / finding_count if finding_count > 0 else 0
+
+    # Category coverage: how many categories have findings (target: > 30%)
+    categories_with_findings = len(set(m.matched_item.type for m in missed))
+    total_categories = 3  # skill, agent, command
+    coverage = categories_with_findings / total_categories
+
+    # Acceptance rate from feedback (target: > 50%)
+    accepted = len(feedback.get("accepted", []))
+    dismissed = len(feedback.get("dismissed", []))
+    total_feedback = accepted + dismissed
+    acceptance_rate = accepted / total_feedback if total_feedback > 0 else None
+
+    # Quality assessment
+    issues = []
+    if finding_rate < 0.5:
+        issues.append("Low finding rate - may be missing opportunities")
+    elif finding_rate > 3.0:
+        issues.append("High finding rate - may need stricter filtering")
+
+    if high_conf_rate < 0.6 and finding_count >= 5:
+        issues.append("Many low-confidence findings - quality uncertain")
+
+    if acceptance_rate is not None and acceptance_rate < 0.5:
+        issues.append(f"Low acceptance rate ({acceptance_rate:.0%}) - calibration needed")
+
+    return {
+        "input": {
+            "sessions": session_count,
+            "prompts": prompt_count,
+        },
+        "output": {
+            "findings": finding_count,
+            "high_confidence": high_conf,
+            "category_coverage": f"{categories_with_findings}/{total_categories}",
+        },
+        "rates": {
+            "finding_rate": round(finding_rate, 2),
+            "high_confidence_rate": round(high_conf_rate, 2),
+            "category_coverage_rate": round(coverage, 2),
+            "acceptance_rate": round(acceptance_rate, 2) if acceptance_rate else None,
+        },
+        "targets": {
+            "finding_rate": "0.5-2.0",
+            "high_confidence_rate": ">0.6",
+            "acceptance_rate": ">0.5",
+        },
+        "quality_issues": issues,
+        "overall_quality": "good" if not issues else "needs_attention",
+    }
+
+
+def assess_data_sufficiency(sessions: list, missed: list) -> dict:
+    """ADR-050: Assess if we have enough data for meaningful patterns."""
+    session_count = len(sessions)
+    prompt_count = sum(len(s.prompts) for s in sessions)
+
+    # Classify data sufficiency
+    if session_count >= 10 and prompt_count >= 50:
+        sufficiency = "high"
+        confidence_note = "Sufficient data for reliable patterns"
+    elif session_count >= MIN_SESSIONS_FOR_PATTERN:
+        sufficiency = "medium"
+        confidence_note = "Moderate data - patterns may be preliminary"
+    else:
+        sufficiency = "low"
+        confidence_note = f"Insufficient data ({session_count} sessions, need {MIN_SESSIONS_FOR_PATTERN}+)"
+
+    # Count occurrences per component
+    component_counts: dict[str, int] = defaultdict(int)
+    for m in missed:
+        component_counts[m.matched_item.name] += 1
+
+    # Filter to significant patterns only
+    significant_components = [
+        name for name, count in component_counts.items()
+        if count >= MIN_OCCURRENCES_FOR_SIGNIFICANCE
+    ]
+
+    return {
+        "sessions_analyzed": session_count,
+        "prompts_analyzed": prompt_count,
+        "sufficiency": sufficiency,
+        "confidence_note": confidence_note,
+        "min_sessions_required": MIN_SESSIONS_FOR_PATTERN,
+        "min_occurrences_required": MIN_OCCURRENCES_FOR_SIGNIFICANCE,
+        "significant_patterns": len(significant_components),
+        "insufficient_patterns": len(component_counts) - len(significant_components),
+    }
+
+
+def hash_finding(category: str, component: str, trigger: str) -> str:
+    """ADR-048: Generate stable hash for finding deduplication."""
+    key = f"{category}:{component}:{trigger}".lower()
+    return hashlib.sha256(key.encode()).hexdigest()[:12]
+
+
+def load_feedback() -> dict:
+    """ADR-048: Load user feedback from persistent storage."""
+    if not FEEDBACK_FILE.exists():
+        return {"dismissed": [], "accepted": [], "metadata": {}}
+
+    try:
+        return json.loads(FEEDBACK_FILE.read_text())
+    except (json.JSONDecodeError, Exception) as e:
+        print(f"Warning: Could not load feedback file: {e}", file=sys.stderr)
+        return {"dismissed": [], "accepted": [], "metadata": {}}
+
+
+def get_dismissed_hashes(feedback: dict) -> set[str]:
+    """ADR-048: Get set of dismissed finding hashes."""
+    dismissed = set()
+    for item in feedback.get("dismissed", []):
+        if "finding_hash" in item:
+            dismissed.add(item["finding_hash"])
+    return dismissed
+
+
+def compute_acceptance_rate(feedback: dict) -> dict:
+    """ADR-048: Calculate acceptance rate per category."""
+    by_category: dict[str, dict[str, int]] = defaultdict(lambda: {"accepted": 0, "dismissed": 0})
+
+    for item in feedback.get("accepted", []):
+        cat = item.get("category", "unknown")
+        by_category[cat]["accepted"] += 1
+
+    for item in feedback.get("dismissed", []):
+        cat = item.get("category", "unknown")
+        by_category[cat]["dismissed"] += 1
+
+    rates = {}
+    for cat, counts in by_category.items():
+        total = counts["accepted"] + counts["dismissed"]
+        if total > 0:
+            rates[cat] = {
+                "accepted": counts["accepted"],
+                "dismissed": counts["dismissed"],
+                "rate": round(counts["accepted"] / total, 2),
+            }
+
+    return rates
+
+
+def calculate_recency_weight(session_date: Optional[datetime], half_life_days: int = RECENCY_HALF_LIFE_DAYS) -> float:
+    """ADR-047: Calculate recency weight using exponential decay.
+
+    More recent sessions have higher weight.
+    - Today: 1.0
+    - 7 days ago: 0.5
+    - 14 days ago: 0.25
+    """
+    if session_date is None:
+        return 0.5  # Default weight for unknown dates
+
+    age_days = (datetime.now() - session_date).days
+    if age_days < 0:
+        return 1.0  # Future dates treated as current
+
+    return 0.5 ** (age_days / half_life_days)
 
 
 @dataclass
@@ -193,6 +463,90 @@ class MissedOpportunity:
     session_id: str
     matched_item: SkillOrAgent
     matched_triggers: list[str]
+    # ADR-046: Confidence scoring
+    confidence: float = 0.5  # 0.0 - 1.0
+    evidence: list[str] = field(default_factory=list)  # What supports this finding
+    # ADR-047: Temporal data
+    session_date: Optional[datetime] = None
+    recency_weight: float = 1.0
+    # ADR-048: Feedback tracking
+    finding_hash: str = ""
+
+    def __post_init__(self):
+        """Compute finding hash after initialization."""
+        if not self.finding_hash and self.matched_item:
+            trigger = self.matched_triggers[0] if self.matched_triggers else ""
+            self.finding_hash = hash_finding(
+                self.matched_item.type,
+                self.matched_item.name,
+                trigger,
+            )
+
+
+# ADR-046: Confidence thresholds and calculation
+CONFIDENCE_HIGH = 0.8
+CONFIDENCE_MEDIUM = 0.5
+CONFIDENCE_LOW = 0.3
+
+
+def calculate_match_confidence(
+    item: SkillOrAgent,
+    matched_triggers: list[str],
+    prompt: str,
+) -> tuple[float, list[str]]:
+    """ADR-046: Calculate confidence score for a potential match.
+
+    Returns (confidence, evidence_list).
+
+    Scoring:
+    - Exact name match: 0.5 (strong signal - user mentioned the component)
+    - 3+ non-name triggers: 0.35
+    - 2 non-name triggers: 0.25
+    - 1 non-name trigger: 0.15
+    - Long specific trigger (5+ chars): 0.1 bonus
+    """
+    evidence = []
+    score = 0.0
+
+    # Check if item name was matched (strong signal - user mentioned the component)
+    name_matched = item.name.lower() in [t.lower() for t in matched_triggers]
+    if name_matched:
+        score += 0.6
+        evidence.append(f"Exact name match: '{item.name}'")
+
+    # Count meaningful trigger matches (exclude name)
+    non_name_triggers = [t for t in matched_triggers if t.lower() != item.name.lower()]
+    trigger_count = len(non_name_triggers)
+
+    if trigger_count >= 3:
+        score += 0.5
+        evidence.append(f"{trigger_count} trigger phrases matched")
+    elif trigger_count >= 2:
+        score += 0.4
+        evidence.append(f"{trigger_count} trigger phrases matched")
+    elif trigger_count == 1:
+        score += 0.2
+        evidence.append(f"1 trigger phrase matched: '{non_name_triggers[0]}'")
+
+    # Check for long specific triggers (higher confidence)
+    for trigger in non_name_triggers:
+        if len(trigger) >= 5:  # Longer triggers are more specific
+            score += 0.1
+            evidence.append(f"Specific trigger: '{trigger}'")
+            break
+
+    # Clamp to [0.0, 1.0]
+    confidence = min(max(score, CONFIDENCE_LOW), 1.0)
+
+    # Classify evidence quality
+    if confidence >= CONFIDENCE_HIGH:
+        evidence.insert(0, "HIGH confidence")
+    elif confidence >= CONFIDENCE_MEDIUM:
+        evidence.insert(0, "MEDIUM confidence")
+    else:
+        evidence.insert(0, "LOW confidence")
+
+    return confidence, evidence
 
 
 @dataclass
@@ -1121,8 +1475,17 @@ def parse_session_file(session_path: Path) -> SessionData:
     """Parse a session JSONL file with outcome and compaction tracking.
 
     ADR-026: Tracks parse success rate and warns if schema may have changed.
+    ADR-047: Tracks session date and calculates recency weight.
     """
-    session_data = SessionData(session_id=session_path.stem[:8])
+    # ADR-047: Get session date from file modification time
+    session_date = datetime.fromtimestamp(session_path.stat().st_mtime)
+    recency_weight = calculate_recency_weight(session_date)
+
+    session_data = SessionData(
+        session_id=session_path.stem[:8],
+        session_date=session_date,
+        recency_weight=recency_weight,
+    )
     # ADR-006: Include timestamp for duration tracking
     pending_tools: dict[str, tuple[str, dict, Optional[float]]] = {}  # tool_use_id -> (tool_name, tool_input, timestamp)
     awaiting_followup: list[tuple[str, dict, Optional[int], str]] = []  # (tool_name, tool_input, duration_ms, position)
@@ -1368,11 +1731,18 @@ def analyze_jsonl(
                     was_used = f"/{item.name}" in prompt.lower()
 
                 if not was_used:
+                    # ADR-046: Calculate confidence and evidence
+                    confidence, evidence = calculate_match_confidence(item, triggers, prompt)
                     missed.append(MissedOpportunity(
                         prompt=prompt,
                         session_id=session.session_id,
                         matched_item=item,
                         matched_triggers=triggers,
+                        confidence=confidence,
+                        evidence=evidence,
+                        # ADR-047: Temporal data
+                        session_date=session.session_date,
+                        recency_weight=session.recency_weight,
                     ))
 
                     if item.type == "skill":
@@ -1394,6 +1764,8 @@ def generate_analysis_json(
     jsonl_stats: dict,
     claude_md: dict,
     setup_profile: SetupProfile,
+    missed: list[MissedOpportunity],  # ADR-046: Include for confidence data
+    feedback: dict,  # ADR-048: User feedback
 ) -> dict:
     """Generate rich JSON output for agent interpretation."""
 
@@ -1411,14 +1783,33 @@ def generate_analysis_json(
     parsing_errors_count = sum(len(s.parsing_errors) for s in sessions)
     parse_success_rate = entries_parsed / entries_total if entries_total > 0 else 1.0
 
+    # ADR-046: Compute confidence distribution for potential matches
+    high_conf_count = sum(1 for m in missed if m.confidence >= CONFIDENCE_HIGH)
+    med_conf_count = sum(1 for m in missed if CONFIDENCE_MEDIUM <= m.confidence < CONFIDENCE_HIGH)
+    low_conf_count = sum(1 for m in missed if m.confidence < CONFIDENCE_MEDIUM)
+
+    # ADR-050: Assess data sufficiency
+    data_sufficiency = assess_data_sufficiency(sessions, missed)
+
+    # ADR-053: Compute quality metrics
+    quality_metrics = compute_quality_metrics(sessions, missed, feedback)
+
+    # ADR-054: Pre-compute deterministic findings
+    pre_computed = compute_pre_computed_findings(skills, agents, commands, sessions, missed, setup_profile)
+
     return {
         "_schema": {
             "description": "Claude Code usage analysis data for agent interpretation",
-            "version": "3.2",
+            "version": "3.9",  # ADR-046-054: All methodology ADRs implemented
             "sections": {
                 "discovery": "All available skills, agents, commands, and hooks discovered from global, project, and plugin sources",
                 "sessions": "Parsed session data showing what was actually used",
                 "stats": "Aggregated statistics on usage, outcomes, interruptions with followup context, and missed opportunities",
+                "data_sufficiency": "ADR-050: Statistical sufficiency assessment for pattern detection",
+                "quality_metrics": "ADR-053: Analysis quality metrics for self-evaluation",
+                "pre_computed_findings": "ADR-054: Deterministic findings (100% certain, no LLM needed)",
+                "potential_matches_detailed": "ADR-046: Detailed potential matches with confidence scores and evidence",
+                "feedback": "ADR-048: User feedback on previous recommendations (accepted/dismissed)",
                 "claude_md": "Content and structure of CLAUDE.md configuration files",
                 "setup_profile": "Computed setup profile with complexity, shape, red flags, and coverage gaps",
             },
@@ -1480,6 +1871,16 @@ def generate_analysis_json(
 
         "sessions": {
             "count": len(sessions),
+            # ADR-047: Include temporal data per session
+            "temporal": [
+                {
+                    "session_id": s.session_id,
+                    "date": s.session_date.isoformat() if s.session_date else None,
+                    "age_days": (datetime.now() - s.session_date).days if s.session_date else None,
+                    "recency_weight": round(s.recency_weight, 2),
+                }
+                for s in sessions
+            ],
             "prompts": [
                 {
                     "session_id": s.session_id,
@@ -1520,6 +1921,70 @@ def generate_analysis_json(
                 for s in sessions
                 for it in s.interrupted_tools
             ][:20],  # Limit to 20 most recent
+        },
+
+        # ADR-050: Statistical significance assessment
+        "data_sufficiency": data_sufficiency,
+
+        # ADR-053: Analysis quality metrics
+        "quality_metrics": quality_metrics,
+
+        # ADR-054: Pre-computed deterministic findings
+        "pre_computed_findings": pre_computed,
+
+        # ADR-046 + ADR-047 + ADR-049: Detailed potential matches with limits
+        "potential_matches_detailed": {
+            "summary": {
+                "total": len(missed),
+                "high_confidence": high_conf_count,
+                "medium_confidence": med_conf_count,
+                "low_confidence": low_conf_count,
+                # ADR-047: Recency-weighted summary
+                "recent_matches": sum(1 for m in missed if m.recency_weight >= 0.5),
+                "stale_matches": sum(1 for m in missed if m.recency_weight < 0.5),
+            },
+            # ADR-049: Alert fatigue limits
+            "limits": {
+                "max_per_category": MAX_FINDINGS_PER_CATEGORY,
+                "max_total": MAX_TOTAL_FINDINGS,
+                "showing": min(len(missed), MAX_FINDINGS_DETAILED),
+                "hidden": max(0, len(missed) - MAX_FINDINGS_DETAILED),
+            },
+            # ADR-049: Findings by type (limited per category)
+            "by_type": {
+                "skill": sum(1 for m in missed if m.matched_item.type == "skill"),
+                "agent": sum(1 for m in missed if m.matched_item.type == "agent"),
+                "command": sum(1 for m in missed if m.matched_item.type == "command"),
+            },
+            # Sort by combined score (confidence * recency), limit to MAX_FINDINGS_DETAILED
+            "matches": [
+                {
+                    "component": m.matched_item.name,
+                    "type": m.matched_item.type,
+                    "source": m.matched_item.source_type,
+                    "prompt_preview": m.prompt[:100],
+                    "session_id": m.session_id,
+                    "confidence": round(m.confidence, 2),
+                    "evidence": m.evidence,
+                    "matched_triggers": m.matched_triggers,
+                    # ADR-047: Recency data
+                    "recency_weight": round(m.recency_weight, 2),
+                    "age_days": (datetime.now() - m.session_date).days if m.session_date else None,
+                    "priority_score": round(m.confidence * m.recency_weight, 2),  # Combined score
+                    # ADR-048: Finding hash for feedback tracking
+                    "finding_hash": m.finding_hash,
+                }
+                for m in sorted(missed, key=lambda x: -(x.confidence * x.recency_weight))[:MAX_FINDINGS_DETAILED]
+            ],
+        },
+
+        # ADR-048: User feedback data
+        "feedback": {
+            "has_feedback": bool(feedback.get("dismissed") or feedback.get("accepted")),
+            "acceptance_rates": compute_acceptance_rate(feedback),
+            "dismissed_count": len(feedback.get("dismissed", [])),
+            "accepted_count": len(feedback.get("accepted", [])),
+            "dismissed_hashes": list(get_dismissed_hashes(feedback)),
         },
 
         "claude_md": claude_md,
@@ -1856,10 +2321,20 @@ def main():
         print(f"  → {already_disabled_count} already disabled (no action needed)", file=sys.stderr)
     print("", file=sys.stderr)
 
+    # ADR-048: Load feedback and filter dismissed findings
+    feedback = load_feedback()
+    dismissed_hashes = get_dismissed_hashes(feedback)
+    if dismissed_hashes:
+        original_count = len(missed)
+        missed = [m for m in missed if m.finding_hash not in dismissed_hashes]
+        filtered_count = original_count - len(missed)
+        if filtered_count > 0:
+            print(f"[Feedback] Filtered {filtered_count} previously dismissed findings", file=sys.stderr)
+
     # Output
     if args.format == "json":
         output = generate_analysis_json(
-            skills, agents, commands, hooks, sessions, jsonl_stats, claude_md, setup_profile
+            skills, agents, commands, hooks, sessions, jsonl_stats, claude_md, setup_profile, missed, feedback
         )
         print(json.dumps(output, indent=2))
     elif args.format == "dashboard":

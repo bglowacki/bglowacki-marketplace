@@ -1,6 +1,6 @@
 # ADR-051: Agent Prompt Simplification and Consistency
 
-**Status:** PROPOSED
+**Status:** IMPLEMENTED
 **Date:** 2026-01-28
 **Category:** Architecture
 **Source:** Deep research on LLM best practices

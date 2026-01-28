@@ -1,6 +1,6 @@
 # ADR-054: Deterministic Pre-Filtering Before LLM Analysis
 
-**Status:** PROPOSED
+**Status:** IMPLEMENTED
 **Date:** 2026-01-28
 **Category:** Architecture
 **Source:** Deep research on hybrid AI/rule systems

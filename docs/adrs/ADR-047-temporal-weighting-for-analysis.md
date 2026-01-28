@@ -1,6 +1,6 @@
 # ADR-047: Temporal Weighting for Usage Analysis
 
-**Status:** PROPOSED
+**Status:** IMPLEMENTED
 **Date:** 2026-01-28
 **Category:** Methodology
 **Source:** Deep research on usage analytics best practices

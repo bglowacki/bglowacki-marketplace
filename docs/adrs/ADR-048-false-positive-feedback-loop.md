@@ -1,6 +1,6 @@
 # ADR-048: False Positive Feedback Loop
 
-**Status:** PROPOSED
+**Status:** IMPLEMENTED
 **Date:** 2026-01-28
 **Category:** Methodology
 **Source:** Deep research on recommendation systems

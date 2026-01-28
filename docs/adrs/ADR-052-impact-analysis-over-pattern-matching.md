@@ -1,6 +1,6 @@
 # ADR-052: Impact Analysis Over Pattern Matching
 
-**Status:** PROPOSED
+**Status:** IMPLEMENTED
 **Date:** 2026-01-28
 **Category:** Methodology
 **Source:** Deep research on product analytics

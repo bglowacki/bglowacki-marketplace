@@ -1,6 +1,6 @@
 # ADR-049: Alert Fatigue Prevention
 
-**Status:** PROPOSED
+**Status:** IMPLEMENTED
 **Date:** 2026-01-28
 **Category:** UX
 **Source:** Deep research on recommendation systems

@@ -1,6 +1,6 @@
 # ADR-050: Statistical Significance for Pattern Detection
 
-**Status:** PROPOSED
+**Status:** IMPLEMENTED
 **Date:** 2026-01-28
 **Category:** Methodology
 **Source:** Deep research on analytics best practices
