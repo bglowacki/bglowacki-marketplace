@@ -1042,7 +1042,10 @@ def discover_skills(paths: list[Path]) -> list[SkillOrAgent]:
             if not skill_dir.is_dir():
                 continue
 
+            # Support both SKILL.md and skill.md (case variations)
             skill_md = skill_dir / "SKILL.md"
+            if not skill_md.exists():
+                skill_md = skill_dir / "skill.md"
             if not skill_md.exists():
                 continue
 
@@ -1175,8 +1178,14 @@ def discover_from_plugins(plugins_cache: Path) -> tuple[list[SkillOrAgent], list
             skills_path = latest_version / "skills"
             if skills_path.exists():
                 for skill_dir in skills_path.iterdir():
-                    if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists():
-                        skill_md = skill_dir / "SKILL.md"
+                    if not skill_dir.is_dir():
+                        continue
+                    # Support both SKILL.md and skill.md
+                    skill_md = skill_dir / "SKILL.md"
+                    if not skill_md.exists():
+                        skill_md = skill_dir / "skill.md"
+                    if not skill_md.exists():
+                        continue
                         try:
                             content = skill_md.read_text()
                             frontmatter = extract_yaml_frontmatter(content, str(skill_md))
