@@ -987,7 +987,11 @@ def compute_plugin_usage(
 # =============================================================================
 
 def extract_yaml_frontmatter(content: str, source_path: str = "") -> dict:
-    """Extract YAML frontmatter from markdown content."""
+    """Extract YAML frontmatter from markdown content.
+
+    Falls back to regex extraction if YAML parsing fails, since Claude Code
+    uses a more lenient parser that handles unquoted colons in values.
+    """
     import yaml
 
     if not content.startswith("---"):
@@ -1000,9 +1004,26 @@ def extract_yaml_frontmatter(content: str, source_path: str = "") -> dict:
     try:
         return yaml.safe_load(parts[1]) or {}
     except yaml.YAMLError:
-        if source_path:
+        # Fallback: extract key fields with regex (handles unquoted colons)
+        # Claude Code uses a more lenient parser, so we do too
+        frontmatter_text = parts[1]
+        result = {}
+
+        # Extract name: value (first line match)
+        name_match = re.search(r'^name:\s*(.+?)$', frontmatter_text, re.MULTILINE)
+        if name_match:
+            result["name"] = name_match.group(1).strip().strip('"\'')
+
+        # Extract description: value (may span to next key or end)
+        desc_match = re.search(r'^description:\s*(.+?)(?=^[a-z-]+:|$)', frontmatter_text, re.MULTILINE | re.DOTALL)
+        if desc_match:
+            result["description"] = desc_match.group(1).strip().strip('"\'')
+
+        # Only track as issue if we couldn't extract anything useful
+        if not result and source_path:
             _yaml_parse_issues.append(source_path)
-        return {}
+
+        return result
 
 
 def extract_triggers_from_description(description: str) -> list[str]:

@@ -49,8 +49,8 @@ description: No closing delimiter
         assert result == {}
         assert len(collect_usage._yaml_parse_issues) == 0
 
-    def test_invalid_yaml_frontmatter(self):
-        """Invalid YAML should return empty dict and record the issue."""
+    def test_invalid_yaml_frontmatter_with_fallback(self):
+        """Invalid YAML should fall back to regex extraction."""
         content = """---
 name: Test Skill
 description: This has a colon: in the middle without quotes
@@ -59,19 +59,21 @@ description: This has a colon: in the middle without quotes
 # Content
 """
         result = collect_usage.extract_yaml_frontmatter(content, "/test/path/SKILL.md")
-        assert result == {}
-        assert len(collect_usage._yaml_parse_issues) == 1
-        assert collect_usage._yaml_parse_issues[0] == "/test/path/SKILL.md"
+        # Regex fallback extracts name and description
+        assert result["name"] == "Test Skill"
+        assert "colon" in result["description"]
+        # No issue recorded because we extracted data successfully
+        assert len(collect_usage._yaml_parse_issues) == 0
 
-    def test_invalid_yaml_without_path(self):
-        """Invalid YAML without source_path should not record issue."""
+    def test_invalid_yaml_with_regex_fallback(self):
+        """Invalid YAML uses regex fallback to extract fields."""
         content = """---
 name: Test
 bad: yaml: here
 ---
 """
         result = collect_usage.extract_yaml_frontmatter(content)
-        assert result == {}
+        assert result["name"] == "Test"
         assert len(collect_usage._yaml_parse_issues) == 0
 
     def test_empty_frontmatter(self):

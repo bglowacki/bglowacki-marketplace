@@ -1,6 +1,6 @@
 {
   "name": "observability",
-  "version": "2.4.5",
+  "version": "2.4.6",
   "description": "Usage analysis from Claude Code session logs",
   "hooks": {
     "Stop": [{
