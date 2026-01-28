@@ -39,4 +39,4 @@ uv run observability/skills/observability-usage-collector/scripts/collect_usage.
 
 ## ADR Status
 
-See `docs/adrs/` for Architecture Decision Records. Use `docs/adrs/022-implementation-priority.md` for implementation order.
+See `docs/adrs/` for Architecture Decision Records. Use `docs/adrs/ADR-067-implementation-priority.md` for implementation order.

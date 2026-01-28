@@ -1,8 +1,13 @@
-# Architecture Decision Records - Observability Methodology Review
+# Architecture Decision Records
 
-This directory contains ADRs generated during a 1-hour methodology review session on 2026-01-27.
+This directory contains all ADRs for the observability plugin.
 
-**Note:** Files with `ADR-XXX-` prefix are from this session. Pre-existing ADRs (001-031 without prefix) are from previous work.
+## ADR Numbering
+
+| Range | Category | Description |
+|-------|----------|-------------|
+| ADR-001 to ADR-045 | Methodology | Analysis methodology improvements |
+| ADR-046 to ADR-076 | Project | Project-level code/docs improvements |
 
 ## Session Summary (Updated after Research Cycle)
 
