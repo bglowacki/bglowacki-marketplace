@@ -1,6 +1,6 @@
 [project]
 name = "observability"
-version = "2.4.2"
+version = "2.4.3"
 description = "Claude Code session analysis plugin"
 requires-python = ">=3.10"
 dependencies = ["pyyaml"]

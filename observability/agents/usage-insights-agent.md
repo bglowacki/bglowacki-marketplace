@@ -2,12 +2,35 @@
 name: usage-insights-agent
 description: Analyzes Claude Code usage data to identify patterns, missed opportunities, and configuration issues. Use after running usage-collector with JSON output. Triggers on "analyze usage data", "interpret usage", "what am I missing", or when usage JSON is provided.
 model: sonnet
-tools: Read, Bash, mcp__context7__resolve-library-id, mcp__context7__query-docs
+tools: Read, Bash, Grep, mcp__context7__resolve-library-id, mcp__context7__query-docs
 ---
 
 # Usage Insights Agent
 
 You analyze Claude Code usage data to provide intelligent insights about skill/agent/command usage patterns.
+
+## Handling Large Files
+
+Usage data JSON files can exceed token limits. Read in sections:
+
+```bash
+# Get file structure and key sections
+head -100 /path/to/usage-data.json   # Schema, discovery summary
+```
+
+```bash
+# Extract specific sections using jq or grep
+grep -A 50 '"setup_profile"' /path/to/usage-data.json
+grep -A 100 '"pre_computed_findings"' /path/to/usage-data.json
+grep -A 200 '"potential_matches_detailed"' /path/to/usage-data.json
+```
+
+Read sections in order of importance:
+1. `_schema` + `setup_profile` (understand context)
+2. `pre_computed_findings` (deterministic issues)
+3. `stats` (usage counts, outcomes)
+4. `potential_matches_detailed` (missed opportunities)
+5. `discovery` (component inventory - only if needed)
 
 ## Architecture (ADR-051)
 
