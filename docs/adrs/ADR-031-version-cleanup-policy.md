@@ -1,6 +1,6 @@
 # ADR-031: Plugin Version Cleanup Policy
 
-**Status:** NEEDS_MORE_INFO
+**Status:** BLOCKED
 **Date:** 2026-01-27
 **Category:** Operations
 **Source:** Research finding from ADR-022 performance analysis

@@ -1,6 +1,6 @@
 # ADR-018: Configuration Externalization Strategy
 
-**Status:** ACCEPTED
+**Status:** REJECTED (Deep Research)
 **Date:** 2026-01-27
 **Category:** Architecture
 **Decision:** Option A + D (YAML + env var overrides)

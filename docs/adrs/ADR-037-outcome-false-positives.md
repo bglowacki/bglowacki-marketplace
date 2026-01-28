@@ -1,6 +1,6 @@
 # ADR-037: Outcome Detection False Positives from Generic Matching
 
-**Status:** ACCEPTED
+**Status:** DEFERRED
 **Date:** 2026-01-27
 **Category:** Methodology
 **Source:** Code exploration finding

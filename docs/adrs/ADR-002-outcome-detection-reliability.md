@@ -1,6 +1,6 @@
 # ADR-002: Outcome Detection Reliability
 
-**Status:** ACCEPTED
+**Status:** REJECTED (Deep Research)
 **Date:** 2026-01-27
 **Category:** Methodology
 **Decision:** Options A + C (Tri-State + Tool-Specific Strategies)

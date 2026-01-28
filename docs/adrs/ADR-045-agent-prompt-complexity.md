@@ -1,6 +1,6 @@
 # ADR-045: Agent Prompt Complexity Reduction
 
-**Status:** NEEDS_MORE_INFO
+**Status:** BLOCKED
 **Date:** 2026-01-27
 **Category:** UX / Methodology
 **Source:** Code exploration finding

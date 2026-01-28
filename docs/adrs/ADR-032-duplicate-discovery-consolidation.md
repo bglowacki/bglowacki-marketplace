@@ -1,6 +1,6 @@
 # ADR-032: Consolidate Duplicate Discovery Logic
 
-**Status:** ACCEPTED
+**Status:** DEPRIORITIZED
 **Date:** 2026-01-27
 **Category:** Architecture
 **Source:** Research finding from ADR-022 performance analysis

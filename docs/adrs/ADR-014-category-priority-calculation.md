@@ -1,6 +1,6 @@
 # ADR-014: Category Priority Calculation
 
-**Status:** ACCEPTED
+**Status:** REJECTED (Deep Research)
 **Date:** 2026-01-27
 **Category:** Methodology
 **Decision:** Option A (Weighted Issue Scoring) with Policy pattern

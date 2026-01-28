@@ -1,6 +1,6 @@
 # ADR-024: Test Coverage for Methodology Code
 
-**Status:** ACCEPTED (REVISED after Deep Research)
+**Status:** DEPRIORITIZED (REVISED after Deep Research)
 **Date:** 2026-01-27
 **Revised:** 2026-01-27
 **Category:** Quality

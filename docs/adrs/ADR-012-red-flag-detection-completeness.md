@@ -1,6 +1,6 @@
 # ADR-012: Red Flag Detection Completeness
 
-**Status:** ACCEPTED
+**Status:** REJECTED (Deep Research)
 **Date:** 2026-01-27
 **Category:** Methodology
 **Decision:** Implement comprehensive severity-based, extensible red flag system

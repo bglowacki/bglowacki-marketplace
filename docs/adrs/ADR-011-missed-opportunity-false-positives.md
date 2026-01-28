@@ -1,6 +1,6 @@
 # ADR-011: Missed Opportunity False Positive Reduction
 
-**Status:** NEEDS_MORE_INFO
+**Status:** BLOCKED
 **Date:** 2026-01-27
 **Category:** Methodology
 **Decision:** Pending - requires false positive rate data

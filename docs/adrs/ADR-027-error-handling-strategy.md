@@ -1,6 +1,6 @@
 # ADR-027: Error Handling Strategy
 
-**Status:** ACCEPTED
+**Status:** DEFERRED
 **Date:** 2026-01-27
 **Category:** Architecture
 **Decision:** Option B (Hybrid structured + stderr)
