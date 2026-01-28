@@ -57,6 +57,9 @@ FREQ_RARELY_MAX = 2
 FREQ_SOMETIMES_MAX = 10
 # often: > FREQ_SOMETIMES_MAX
 
+# Track YAML parsing issues for summary reporting (graceful handling)
+_yaml_parse_issues: list[str] = []
+
 
 @dataclass
 class SchemaFingerprint:
@@ -269,6 +272,7 @@ def compute_pre_computed_findings(
         "never_used": never_used[:20],  # Limit
         "name_collisions": name_collisions,
         "exact_trigger_matches": exact_matches[:20],  # Limit
+        "invalid_yaml_files": _yaml_parse_issues[:20],  # Files with YAML frontmatter errors
         # Reference existing pre-computed data
         "overlapping_triggers_count": len(setup_profile.overlapping_triggers),
         "description_quality_issues": sum(1 for d in setup_profile.description_quality if d.get("needs_improvement")),
@@ -277,6 +281,7 @@ def compute_pre_computed_findings(
             "never_used": len(never_used),
             "name_collisions": len(name_collisions),
             "exact_matches": len(exact_matches),
+            "invalid_yaml_files": len(_yaml_parse_issues),
         },
     }
 
@@ -994,9 +999,9 @@ def extract_yaml_frontmatter(content: str, source_path: str = "") -> dict:
 
     try:
         return yaml.safe_load(parts[1]) or {}
-    except yaml.YAMLError as e:
+    except yaml.YAMLError:
         if source_path:
-            print(f"Warning: Invalid YAML frontmatter in {source_path}: {e}", file=sys.stderr)
+            _yaml_parse_issues.append(source_path)
         return {}
 
 
@@ -1800,7 +1805,7 @@ def generate_analysis_json(
     return {
         "_schema": {
             "description": "Claude Code usage analysis data for agent interpretation",
-            "version": "3.9",  # ADR-046-054: All methodology ADRs implemented
+            "version": "3.10",  # Added invalid_yaml_files to pre_computed_findings
             "sections": {
                 "discovery": "All available skills, agents, commands, and hooks discovered from global, project, and plugin sources",
                 "sessions": "Parsed session data showing what was actually used",
@@ -2062,6 +2067,14 @@ def print_table(
                 prompt_preview = m.prompt[:80].replace("\n", " ")
                 print(f"    Session {m.session_id}: \"{prompt_preview}...\"")
 
+    # YAML parsing issues
+    if _yaml_parse_issues:
+        print("\n--- Files with Invalid YAML Frontmatter ---")
+        for path in _yaml_parse_issues[:10]:
+            print(f"  ⚠ {path}")
+        if len(_yaml_parse_issues) > 10:
+            print(f"  ... and {len(_yaml_parse_issues) - 10} more")
+
     print("\n" + "=" * 80)
     print("Use usage-insights-agent to analyze this data for actionable insights.")
     print("=" * 80)
@@ -2088,6 +2101,13 @@ def print_dashboard(jsonl_stats: dict):
     print("\n┌─ Summary " + "─" * 66 + "┐")
     print(f"│ Sessions: {jsonl_stats['total_sessions']:4} | Prompts: {jsonl_stats['total_prompts']:5} | Skills used: {len(jsonl_stats['skills_used']):3} | Agents used: {len(jsonl_stats['agents_used']):3}    │")
     print("└" + "─" * 76 + "┘")
+
+    # YAML issues
+    if _yaml_parse_issues:
+        print("\n┌─ Config Issues " + "─" * 60 + "┐")
+        print(f"│ {len(_yaml_parse_issues)} file(s) with invalid YAML frontmatter" + " " * (76 - 35 - len(str(len(_yaml_parse_issues)))) + "│")
+        print("└" + "─" * 76 + "┘")
+
     print("\nUse usage-insights-agent to analyze this data for actionable insights.")
     print()
 
@@ -2189,6 +2209,7 @@ def print_quick_stats(stats: dict, days: int):
 # =============================================================================
 
 def main():
+    _yaml_parse_issues.clear()  # Reset for fresh run
     parser = argparse.ArgumentParser(description="Collect Claude Code usage data for analysis")
     parser.add_argument("--sessions", type=int, default=DEFAULT_SESSIONS, help=f"Sessions to analyze (default: {DEFAULT_SESSIONS})")
     parser.add_argument("--format", choices=["table", "dashboard", "json"], default="table")
@@ -2242,6 +2263,8 @@ def main():
     hooks = discover_hooks(settings_paths, PLUGINS_CACHE)
 
     print(f"  ✓ Found {len(skills)} skills, {len(agents)} agents, {len(commands)} commands, {len(hooks)} hooks", file=sys.stderr)
+    if _yaml_parse_issues:
+        print(f"  ⚠ Skipped {len(_yaml_parse_issues)} files with invalid YAML frontmatter", file=sys.stderr)
 
     print("\n[2/4] Parsing CLAUDE.md files...", file=sys.stderr)
     claude_md_paths = [
