@@ -10,7 +10,7 @@ import pytest
 
 # Add the scripts directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "observability-usage-collector" / "scripts"))
-from collect_usage import SkillOrAgent, find_matches
+from collect_usage import SkillOrAgent, find_matches, DEFAULT_DAYS
 
 
 @pytest.fixture
@@ -211,6 +211,14 @@ class TestMultipleItems:
         """Should handle empty items list gracefully."""
         matches = find_matches("any prompt", [])
         assert matches == []
+
+
+class TestConstants:
+    """Tests for module constants (Story 1.1, AC-3)."""
+
+    def test_default_days_is_seven(self):
+        """DEFAULT_DAYS should be 7 per PRD specification."""
+        assert DEFAULT_DAYS == 7, f"DEFAULT_DAYS should be 7 per PRD, but got {DEFAULT_DAYS}"
 
 
 class TestEdgeCases:

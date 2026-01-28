@@ -53,7 +53,7 @@ uv run observability/skills/observability-usage-collector/scripts/collect_usage.
 ### Quick Stats
 
 ```bash
-uv run observability/skills/observability-usage-collector/scripts/collect_usage.py --quick-stats --days 14
+uv run observability/skills/observability-usage-collector/scripts/collect_usage.py --quick-stats --days 7
 ```
 
 ### Analyze with Agent

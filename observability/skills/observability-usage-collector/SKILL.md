@@ -34,7 +34,7 @@ Add flags to the command above:
 | `--format dashboard` | Compact ASCII dashboard |
 | `--quick-stats` | Fast mode from session summaries |
 | `--sessions N` | Analyze N sessions (default: 10) |
-| `--days N` | Days for quick stats (default: 14) |
+| `--days N` | Days for quick stats (default: 7) |
 | `--verbose` | Show detailed potential matches |
 
 ## Pipeline

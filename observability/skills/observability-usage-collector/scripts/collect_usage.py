@@ -33,7 +33,7 @@ MAX_DESCRIPTION_LENGTH = 200
 MAX_TOOL_INPUT_LENGTH = 100
 MAX_PROMPT_LENGTH = 500
 DEFAULT_SESSIONS = 10
-DEFAULT_DAYS = 14
+DEFAULT_DAYS = 7  # PRD specification: 7-day default analysis period
 MIN_TRIGGER_LENGTH = 3  # ADR-001: Unified trigger length threshold
 MIN_PARSE_SUCCESS_RATE = 0.80  # ADR-026: Fail if <80% entries parse
 
@@ -192,6 +192,9 @@ class SessionData:
     # ADR-047: Temporal tracking
     session_date: Optional[datetime] = None
     recency_weight: float = 1.0  # 0.0-1.0 based on age
+    # Workflow tracking
+    stages_visited: list[str] = field(default_factory=list)
+    session_type: str = "UNKNOWN"  # DEV or READ
 
 
 # ADR-047: Temporal weighting constants
@@ -390,6 +393,77 @@ def assess_data_sufficiency(sessions: list, missed: list) -> dict:
         "significant_patterns": len(significant_components),
         "insufficient_patterns": len(component_counts) - len(significant_components),
     }
+
+
+def classify_session_type(tools_used: set, stages_visited: list) -> str:
+    """Classify session as DEV (code changes) or READ (exploration only)."""
+    write_tools = {"Edit", "Write", "NotebookEdit"}
+    if any(tool in tools_used for tool in write_tools):
+        return "DEV"
+    dev_stages = {"implement", "test", "commit", "deploy", "review"}
+    if any(s in dev_stages for s in stages_visited):
+        return "DEV"
+    return "READ"
+
+
+def compute_workflow_gaps(sessions: list[SessionData]) -> list[dict]:
+    """Detect sessions with incomplete workflows (implement without test/commit)."""
+    gaps = []
+    for s in sessions:
+        stages = set(s.stages_visited) if s.stages_visited else set()
+        if "implement" in stages and "test" not in stages and "commit" not in stages:
+            gaps.append({
+                "session_id": s.session_id,
+                "stages_visited": list(stages),
+                "missing": ["test", "commit"],
+                "issue": "Implemented but didn't test or commit"
+            })
+    return gaps[:10]
+
+
+def detect_cross_references(
+    skills: list[SkillOrAgent],
+    agents: list[SkillOrAgent],
+    usage_stats: dict
+) -> list[dict]:
+    """Detect skills/agents that reference each other in their content."""
+    all_items = skills + agents
+    name_set = {item.name.lower() for item in all_items}
+    references = []
+
+    for item in all_items:
+        if hasattr(item, 'source_path') and Path(item.source_path).exists():
+            try:
+                content = Path(item.source_path).read_text().lower()
+                refs_found = [name for name in name_set
+                             if name != item.name.lower() and name in content]
+                if refs_found:
+                    references.append({
+                        "source": item.name,
+                        "references": refs_found,
+                        "source_usage": usage_stats.get(item.name, 0),
+                        "referenced_usage": {r: usage_stats.get(r, 0) for r in refs_found}
+                    })
+            except (OSError, IOError):
+                continue
+    return references[:20]
+
+
+def compute_potential_redundancies(cross_refs: list, usage: dict) -> list[dict]:
+    """Flag items that reference others but have lower usage."""
+    redundancies = []
+    for ref in cross_refs:
+        src = ref["source"]
+        src_usage = ref["source_usage"]
+        for target, target_usage in ref["referenced_usage"].items():
+            if src_usage < target_usage and target_usage > 0:
+                redundancies.append({
+                    "items": [src, target],
+                    "overlap_reason": f"{src} references {target} in content",
+                    "usage": {src: src_usage, target: target_usage},
+                    "recommendation": f"Consider if {src} adds value over {target}"
+                })
+    return redundancies[:10]
 
 
 def hash_finding(category: str, component: str, trigger: str) -> str:
@@ -1207,22 +1281,23 @@ def discover_from_plugins(plugins_cache: Path) -> tuple[list[SkillOrAgent], list
                         skill_md = skill_dir / "skill.md"
                     if not skill_md.exists():
                         continue
-                        try:
-                            content = skill_md.read_text()
-                            frontmatter = extract_yaml_frontmatter(content, str(skill_md))
-                            name = frontmatter.get("name", skill_dir.name)
-                            triggers = extract_triggers_from_description(frontmatter.get("description", ""))
-                            triggers.append(name.lower())
-                            skills.append(SkillOrAgent(
-                                name=name,
-                                type="skill",
-                                description=frontmatter.get("description", ""),
-                                triggers=triggers,
-                                source_path=str(skill_md),
-                                source_type=source_type,
-                            ))
-                        except Exception as e:
-                            print(f"Warning: Could not parse {skill_md}: {e}", file=sys.stderr)
+
+                    try:
+                        content = skill_md.read_text()
+                        frontmatter = extract_yaml_frontmatter(content, str(skill_md))
+                        name = frontmatter.get("name", skill_dir.name)
+                        triggers = extract_triggers_from_description(frontmatter.get("description", ""))
+                        triggers.append(name.lower())
+                        skills.append(SkillOrAgent(
+                            name=name,
+                            type="skill",
+                            description=frontmatter.get("description", ""),
+                            triggers=triggers,
+                            source_path=str(skill_md),
+                            source_type=source_type,
+                        ))
+                    except Exception as e:
+                        print(f"Warning: Could not parse {skill_md}: {e}", file=sys.stderr)
 
             # Agents
             agents_path = latest_version / "agents"
@@ -2157,6 +2232,7 @@ def analyze_session_summaries(summary_dir: Path, days: int = 14) -> dict:
         "total_compactions": 0,
         "tool_breakdown": defaultdict(int),
         "stages_seen": defaultdict(int),
+        "session_types": defaultdict(int),
         "by_project": defaultdict(lambda: {"sessions": 0, "success": 0, "failure": 0}),
     }
 
@@ -2183,6 +2259,9 @@ def analyze_session_summaries(summary_dir: Path, days: int = 14) -> dict:
 
             for stage in summary.get("stages_visited", []):
                 stats["stages_seen"][stage] += 1
+
+            session_type = summary.get("session_type", "UNKNOWN")
+            stats["session_types"][session_type] += 1
 
             project = summary.get("project", "unknown")
             stats["by_project"][project]["sessions"] += 1
@@ -2223,6 +2302,13 @@ def print_quick_stats(stats: dict, days: int):
         print("\n--- Workflow Stages ---")
         for stage, count in sorted(stats["stages_seen"].items(), key=lambda x: -x[1]):
             print(f"  {stage}: {count} sessions")
+
+    if stats["session_types"]:
+        print("\n--- Session Types ---")
+        total_typed = sum(stats["session_types"].values())
+        for stype, count in sorted(stats["session_types"].items(), key=lambda x: -x[1]):
+            pct = (count / total_typed * 100) if total_typed > 0 else 0
+            print(f"  {stype}: {count} ({pct:.0f}%)")
 
     if stats["by_project"]:
         print("\n--- By Project ---")

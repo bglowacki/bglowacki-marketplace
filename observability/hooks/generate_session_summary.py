@@ -134,6 +134,17 @@ def infer_workflow_stage(tool_name: str, tool_input: dict, current_stage: str) -
     return current_stage
 
 
+def classify_session_type(tool_counts: dict, stages: list, final_stage: str) -> str:
+    """Classify session as DEV (code changes) or READ (exploration only)."""
+    write_tools = {"Edit", "Write", "NotebookEdit"}
+    if any(tool in tool_counts for tool in write_tools):
+        return "DEV"
+    dev_stages = {"implement", "test", "commit", "deploy", "review"}
+    if final_stage in dev_stages or any(s in dev_stages for s in stages):
+        return "DEV"
+    return "READ"
+
+
 def parse_session_file(session_path: Path) -> dict:
     """Parse a session JSONL file and extract summary data."""
     stats = {
@@ -253,9 +264,16 @@ def generate_summary(session_id: str, cwd: str, stats: dict) -> dict:
     """Generate summary JSON from parsed stats."""
     project = os.path.basename(cwd.rstrip("/")) if cwd else "unknown"
 
+    session_type = classify_session_type(
+        stats["tool_counts"],
+        stats["stages_visited"],
+        stats["current_stage"]
+    )
+
     return {
         "session_id": session_id,
         "project": project,
+        "session_type": session_type,
         "timestamp": datetime.now().isoformat(),
         "total_tools": sum(stats["tool_counts"].values()),
         "tool_breakdown": dict(stats["tool_counts"]),
