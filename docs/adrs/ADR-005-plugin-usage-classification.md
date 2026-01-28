@@ -1,6 +1,6 @@
 # ADR-005: Plugin Usage Classification Accuracy
 
-**Status:** ACCEPTED
+**Status:** IMPLEMENTED
 **Date:** 2026-01-27
 **Category:** Methodology
 **Decision:** Combine Options A (Frequency Scoring) + D (Component-Level), reject Option C

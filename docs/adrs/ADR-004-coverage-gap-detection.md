@@ -1,6 +1,6 @@
 # ADR-004: Coverage Gap Detection Methodology
 
-**Status:** ACCEPTED (with validation requirement)
+**Status:** IMPLEMENTED
 **Date:** 2026-01-27
 **Category:** Methodology
 **Decision:** Keep as infrastructure; validate user value per ADR-016 process

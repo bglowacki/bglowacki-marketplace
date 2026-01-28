@@ -1,6 +1,6 @@
 # ADR-008: Overlapping Triggers Detection
 
-**Status:** ACCEPTED
+**Status:** IMPLEMENTED
 **Date:** 2026-01-27
 **Category:** Methodology
 **Decision:** Real problem confirmed; implement severity scoring (Option B)

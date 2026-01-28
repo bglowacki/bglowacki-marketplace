@@ -50,6 +50,12 @@ PROJECTS_DIR = CLAUDE_DIR / "projects"
 SUMMARIES_DIR = CLAUDE_DIR / "session-summaries"
 PLUGINS_CACHE = CLAUDE_DIR / "plugins" / "cache"
 
+# Frequency band thresholds (ADR-005)
+FREQ_NEVER = 0
+FREQ_RARELY_MAX = 2
+FREQ_SOMETIMES_MAX = 10
+# often: > FREQ_SOMETIMES_MAX
+
 
 @dataclass
 class SchemaFingerprint:
@@ -129,6 +135,35 @@ class InterruptedTool:
     tool_name: str
     tool_input: dict
     followup_message: str  # What user said after interrupting
+    # ADR-006 additions
+    duration_ms: Optional[int] = None  # Time from tool start to interruption
+    position: str = "primary"  # "primary" (first pending) or "collateral"
+    category: str = "user_initiated"  # "timeout" | "user_initiated" | "session_abandon"
+
+
+# ADR-006: Tool-aware timeout thresholds (in milliseconds)
+TIMEOUT_THRESHOLDS_MS = {
+    "Bash": 30000,      # 30s
+    "Task": 120000,     # 2 min - subagents take longer
+    "WebFetch": 45000,  # 45s
+    "Read": 10000,      # 10s
+    "Edit": 10000,      # 10s
+    "Write": 10000,     # 10s
+    "default": 30000,   # 30s fallback
+}
+
+
+def classify_interruption(tool_name: str, duration_ms: Optional[int], followup: str) -> str:
+    """ADR-006: Classify interruption type based on duration and context."""
+    if followup == "[session ended]":
+        return "session_abandon"
+
+    if duration_ms is not None:
+        threshold = TIMEOUT_THRESHOLDS_MS.get(tool_name, TIMEOUT_THRESHOLDS_MS["default"])
+        if duration_ms > threshold:
+            return "timeout"
+
+    return "user_initiated"  # Don't guess from keywords per ADR-006
 
 
 @dataclass
@@ -161,6 +196,85 @@ class MissedOpportunity:
 
 
 @dataclass
+class DescriptionQuality:
+    """ADR-007: Multi-dimensional description quality assessment."""
+    name: str
+    item_type: str
+    length_ok: bool
+    has_triggers: bool
+    has_domain: bool
+    has_action_verb: bool
+    issues: list[str]
+
+    @property
+    def needs_improvement(self) -> bool:
+        """Fails if ≥2 dimensions are missing."""
+        checks = [self.length_ok, self.has_triggers, self.has_domain, self.has_action_verb]
+        return sum(1 for c in checks if not c) >= 2
+
+
+# ADR-007: Action verbs commonly used in good descriptions
+ACTION_VERBS = frozenset({
+    "collect", "analyze", "create", "generate", "validate", "check", "scan",
+    "build", "deploy", "run", "execute", "test", "debug", "review", "optimize",
+    "format", "lint", "search", "find", "fetch", "download", "upload", "sync",
+    "transform", "convert", "parse", "extract", "summarize", "document",
+})
+
+# ADR-007: Domain keywords that indicate specific use context
+DOMAIN_KEYWORDS = frozenset({
+    "python", "javascript", "typescript", "react", "vue", "angular", "node",
+    "django", "flask", "fastapi", "git", "github", "docker", "kubernetes",
+    "aws", "azure", "gcp", "database", "sql", "api", "rest", "graphql",
+    "claude", "claude code", "session", "plugin", "skill", "agent",
+})
+
+
+def score_description_quality(item: SkillOrAgent) -> DescriptionQuality:
+    """ADR-007: Score description quality across multiple dimensions."""
+    desc = item.description.lower()
+    issues = []
+
+    # Length check: 30-200 chars is good
+    length_ok = 30 <= len(item.description) <= 200
+    if len(item.description) < 30:
+        issues.append("Description too short (<30 chars)")
+    elif len(item.description) > 200:
+        issues.append("Description too long (>200 chars)")
+
+    # Trigger check: look for quoted phrases or explicit trigger patterns
+    has_triggers = (
+        '"' in desc or
+        "'" in desc or
+        "trigger" in desc or
+        len(item.triggers) >= 2
+    )
+    if not has_triggers:
+        issues.append("Missing explicit trigger phrases")
+
+    # Domain check: mention specific technology/context
+    has_domain = any(kw in desc for kw in DOMAIN_KEYWORDS)
+    if not has_domain:
+        issues.append("Missing domain context (e.g., 'Python', 'git', 'Claude Code')")
+
+    # Action verb check: starts with or contains action verb
+    first_word = desc.split()[0] if desc.split() else ""
+    has_action_verb = first_word in ACTION_VERBS or any(v in desc for v in ACTION_VERBS)
+    if not has_action_verb:
+        issues.append("Missing action verb (e.g., 'Collects', 'Analyzes', 'Creates')")
+
+    return DescriptionQuality(
+        name=item.name,
+        item_type=item.type,
+        length_ok=length_ok,
+        has_triggers=has_triggers,
+        has_domain=has_domain,
+        has_action_verb=has_action_verb,
+        issues=issues,
+    )
+
+
+@dataclass
 class SetupProfile:
     complexity: str  # "minimal", "moderate", "complex"
     total_components: int
@@ -171,6 +285,7 @@ class SetupProfile:
     coverage_gaps: list[str]
     overlapping_triggers: list[dict]  # [{trigger, items}]
     plugin_usage: dict[str, list[str]]  # {"active": [...], "potential": [...], "unused": [...]}
+    description_quality: list[dict] = field(default_factory=list)  # ADR-007
 
 
 def compute_setup_profile(
@@ -236,21 +351,61 @@ def compute_setup_profile(
     if empty_desc_count > 0:
         red_flags.append(f"{empty_desc_count} components with empty descriptions")
 
-    # Find overlapping triggers (ADR-001: use consistent threshold)
-    trigger_map: dict[str, list[str]] = defaultdict(list)
-    for item in skills + agents:
+    # ADR-008: Enhanced overlapping trigger detection with severity scoring
+    # Include commands in overlap detection
+    all_components = skills + agents + commands
+    trigger_map: dict[str, list[tuple[str, str, str]]] = defaultdict(list)  # trigger -> [(type, name, source)]
+
+    for item in all_components:
         for trigger in item.triggers:
             trigger_lower = trigger.lower()
             if len(trigger_lower) >= MIN_TRIGGER_LENGTH:  # ADR-001: Unified threshold
-                trigger_map[trigger_lower].append(f"{item.type}:{item.name}")
+                trigger_map[trigger_lower].append((item.type, item.name, item.source_type))
+
+    # Also check for skill/command name collisions (exact name match = high severity)
+    skill_names = {s.name.lower() for s in skills}
+    command_names = {c.name.lower() for c in commands}
+    name_collisions = skill_names & command_names
 
     overlapping = []
+    high_severity_count = 0
+
     for trigger, items in trigger_map.items():
         if len(items) > 1:
-            overlapping.append({"trigger": trigger, "items": items})
+            # ADR-008: Classify severity
+            types = {t for t, n, s in items}
+            sources = {s for t, n, s in items}
 
-    if overlapping:
-        red_flags.append(f"{len(overlapping)} triggers overlap across multiple components")
+            # Skill/Command collision: HIGH
+            if "skill" in types and "command" in types:
+                severity = "HIGH"
+                high_severity_count += 1
+            # Cross-plugin: MEDIUM
+            elif len(sources) > 1 and any(s.startswith("plugin:") for s in sources):
+                severity = "MEDIUM"
+            # Intra-plugin redundancy: LOW
+            else:
+                severity = "LOW"
+
+            overlapping.append({
+                "trigger": trigger,
+                "items": [f"{t}:{n}" for t, n, s in items],
+                "severity": severity,
+            })
+
+    # Add name collision warnings (highest severity)
+    for name in name_collisions:
+        overlapping.insert(0, {
+            "trigger": f"[name collision: {name}]",
+            "items": [f"skill:{name}", f"command:{name}"],
+            "severity": "HIGH",
+        })
+        high_severity_count += 1
+
+    if high_severity_count > 0:
+        red_flags.append(f"{high_severity_count} HIGH severity trigger/name collisions (skill/command overlap)")
+    elif overlapping:
+        red_flags.append(f"{len(overlapping)} triggers overlap (review recommended)")
 
     # Coverage assessment
     all_items = skills + agents
@@ -271,6 +426,17 @@ def compute_setup_profile(
 
     coverage_gaps = [k for k, v in coverage.items() if not v]
 
+    # ADR-007: Score description quality
+    description_issues = []
+    for item in all_items:
+        quality = score_description_quality(item)
+        if quality.needs_improvement:
+            description_issues.append({
+                "name": quality.name,
+                "type": quality.item_type,
+                "issues": quality.issues,
+            })
+
     return SetupProfile(
         complexity=complexity,
         total_components=total,
@@ -281,6 +447,7 @@ def compute_setup_profile(
         coverage_gaps=coverage_gaps,
         overlapping_triggers=overlapping[:10],  # Limit to top 10
         plugin_usage={"active": [], "potential": [], "unused": []},  # Computed later
+        description_quality=description_issues,  # ADR-007
     )
 
 
@@ -320,14 +487,30 @@ def read_plugin_enabled_states(
     return enabled_states
 
 
+def classify_frequency(count: int) -> str:
+    """ADR-005: Classify usage count into frequency bands."""
+    if count == FREQ_NEVER:
+        return "never"
+    elif count <= FREQ_RARELY_MAX:
+        return "rarely"
+    elif count <= FREQ_SOMETIMES_MAX:
+        return "sometimes"
+    else:
+        return "often"
+
+
 def compute_plugin_usage(
     skills: list[SkillOrAgent],
     agents: list[SkillOrAgent],
     sessions: list,  # list[SessionData]
     potential_matches: list,  # list[MissedOpportunity]
     enabled_states: dict[str, bool] | None = None,
-) -> dict[str, list[str]]:
+) -> dict[str, list[str] | dict]:
     """Compute plugin usage: active, potential, unused, or disabled_but_matched.
+
+    ADR-005 enhancements:
+    - Frequency bands: never/rarely/sometimes/often
+    - Component-level tracking in 'component_frequency' dict
 
     - active: Plugin was used in sessions (skill/agent triggered)
     - potential: Plugin is ENABLED, matched prompts but wasn't triggered
@@ -353,6 +536,7 @@ def compute_plugin_usage(
     # Get all plugins from discovery
     all_plugins: set[str] = set()
     plugin_to_components: dict[str, list[str]] = defaultdict(list)
+    component_to_plugin: dict[str, str] = {}  # ADR-005: reverse lookup
 
     for item in skills + agents:
         source = item.source_type
@@ -360,25 +544,28 @@ def compute_plugin_usage(
             plugin_name = source.replace("plugin:", "")
             all_plugins.add(plugin_name)
             plugin_to_components[plugin_name].append(item.name)
+            component_to_plugin[item.name] = plugin_name
 
-    # Check which plugins were used in sessions
+    # ADR-005: Count usage per component (not just presence)
+    component_usage_count: dict[str, int] = defaultdict(int)
     active: set[str] = set()
-    used_skills = set()
-    used_agents = set()
 
     for session in sessions:
-        used_skills.update(session.skills_used)
-        used_agents.update(session.agents_used)
+        for skill in session.skills_used:
+            component_usage_count[skill] += 1
+        for agent in session.agents_used:
+            component_usage_count[agent] += 1
 
+    # Determine which plugins are active based on component usage
     for plugin, components in plugin_to_components.items():
         for comp in components:
             # Check if component was used (handle namespaced names like "plugin:name")
-            if comp in used_skills or comp in used_agents:
+            if component_usage_count.get(comp, 0) > 0:
                 active.add(plugin)
                 break
             # Also check for plugin-prefixed names
             prefixed = f"{plugin}:{comp}"
-            if prefixed in used_skills or prefixed in used_agents:
+            if component_usage_count.get(prefixed, 0) > 0:
                 active.add(plugin)
                 break
 
@@ -413,12 +600,26 @@ def compute_plugin_usage(
         else:
             already_disabled.add(plugin)
 
+    # ADR-005: Build component-level frequency data
+    component_frequency: dict[str, dict] = {}
+    for plugin, components in plugin_to_components.items():
+        plugin_freq: dict[str, str] = {}
+        for comp in components:
+            count = component_usage_count.get(comp, 0)
+            # Also check prefixed name
+            if count == 0:
+                count = component_usage_count.get(f"{plugin}:{comp}", 0)
+            plugin_freq[comp] = classify_frequency(count)
+        component_frequency[plugin] = plugin_freq
+
     return {
         "active": sorted(active),
         "potential": sorted(potential),
         "unused": sorted(unused),
         "disabled_but_matched": sorted(disabled_but_matched),
         "already_disabled": sorted(already_disabled),
+        # ADR-005: Component-level frequency data
+        "component_frequency": component_frequency,
     }
 
 
@@ -922,8 +1123,9 @@ def parse_session_file(session_path: Path) -> SessionData:
     ADR-026: Tracks parse success rate and warns if schema may have changed.
     """
     session_data = SessionData(session_id=session_path.stem[:8])
-    pending_tools: dict[str, tuple[str, dict]] = {}  # tool_use_id -> (tool_name, tool_input)
-    awaiting_followup: list[tuple[str, dict]] = []  # Tools that were interrupted, waiting for next user message
+    # ADR-006: Include timestamp for duration tracking
+    pending_tools: dict[str, tuple[str, dict, Optional[float]]] = {}  # tool_use_id -> (tool_name, tool_input, timestamp)
+    awaiting_followup: list[tuple[str, dict, Optional[int], str]] = []  # (tool_name, tool_input, duration_ms, position)
 
     try:
         lines = session_path.read_text().strip().split("\n")
@@ -972,7 +1174,7 @@ def parse_session_file(session_path: Path) -> SessionData:
                                     result = item.get("content", "")
 
                                     # Get tool info and remove from pending
-                                    tool_info = pending_tools.pop(tool_use_id, ("unknown", {}))
+                                    tool_info = pending_tools.pop(tool_use_id, ("unknown", {}, None))
                                     tool_name = tool_info[0]
 
                                     if isinstance(result, str):
@@ -985,18 +1187,31 @@ def parse_session_file(session_path: Path) -> SessionData:
                     # Handle interruption - capture which tools were pending
                     if is_interruption:
                         session_data.interrupted_count += 1
+                        # ADR-006: Get current timestamp for duration calculation
+                        interrupt_ts = entry.get("timestamp")
                         # Mark all pending tools as interrupted, awaiting followup
-                        for tool_use_id, (tool_name, tool_input) in pending_tools.items():
-                            awaiting_followup.append((tool_name, tool_input))
+                        is_first = True
+                        for tool_use_id, (tool_name, tool_input, start_ts) in pending_tools.items():
+                            duration_ms = None
+                            if start_ts and interrupt_ts:
+                                duration_ms = int((interrupt_ts - start_ts) * 1000)
+                            # ADR-006: First pending tool is "primary", rest are "collateral"
+                            position = "primary" if is_first else "collateral"
+                            is_first = False
+                            awaiting_followup.append((tool_name, tool_input, duration_ms, position))
                         pending_tools.clear()
 
                     # If we have tools awaiting followup and user said something, capture it
                     elif user_text and awaiting_followup:
-                        for tool_name, tool_input in awaiting_followup:
+                        for tool_name, tool_input, duration_ms, position in awaiting_followup:
+                            followup = user_text[:MAX_PROMPT_LENGTH]
                             session_data.interrupted_tools.append(InterruptedTool(
                                 tool_name=tool_name,
                                 tool_input=tool_input,
-                                followup_message=user_text[:MAX_PROMPT_LENGTH],  # Limit length
+                                followup_message=followup,
+                                duration_ms=duration_ms,
+                                position=position,
+                                category=classify_interruption(tool_name, duration_ms, followup),
                             ))
                         awaiting_followup.clear()
 
@@ -1011,9 +1226,10 @@ def parse_session_file(session_path: Path) -> SessionData:
                                 tool_use_id = item.get("id", "")
                                 tool_input = item.get("input", {})
 
-                                # Track pending tools with full info
+                                # Track pending tools with full info (ADR-006: include timestamp)
                                 if tool_use_id:
-                                    pending_tools[tool_use_id] = (tool_name, tool_input)
+                                    entry_ts = entry.get("timestamp")
+                                    pending_tools[tool_use_id] = (tool_name, tool_input, entry_ts)
 
                                 if tool_name == "Skill":
                                     skill = tool_input.get("skill", "")
@@ -1033,12 +1249,18 @@ def parse_session_file(session_path: Path) -> SessionData:
                 continue
 
         # Remaining pending tools at session end are interrupted (no followup available)
-        for tool_use_id, (tool_name, tool_input) in pending_tools.items():
+        is_first = True
+        for tool_use_id, (tool_name, tool_input, start_ts) in pending_tools.items():
             session_data.interrupted_count += 1
+            position = "primary" if is_first else "collateral"
+            is_first = False
             session_data.interrupted_tools.append(InterruptedTool(
                 tool_name=tool_name,
                 tool_input=tool_input,
                 followup_message="[session ended]",
+                duration_ms=None,  # Can't calculate without end timestamp
+                position=position,
+                category="session_abandon",  # ADR-006
             ))
 
     except Exception as e:
@@ -1312,6 +1534,7 @@ def generate_analysis_json(
             "coverage_gaps": setup_profile.coverage_gaps,
             "overlapping_triggers": setup_profile.overlapping_triggers,
             "plugin_usage": setup_profile.plugin_usage,
+            "description_quality": setup_profile.description_quality,  # ADR-007
         },
     }
 

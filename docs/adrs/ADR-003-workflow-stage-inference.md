@@ -1,6 +1,6 @@
 # ADR-003: Workflow Stage Inference Accuracy
 
-**Status:** ACCEPTED
+**Status:** IMPLEMENTED
 **Date:** 2026-01-27
 **Category:** Methodology
 **Decision:** Keep as informational-only; no accuracy fixes until consumer exists
