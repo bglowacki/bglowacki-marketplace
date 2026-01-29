@@ -47,10 +47,10 @@ development_status:
   epic-1-retrospective: optional
 
   # Epic 2: Missed Opportunity Detection
-  epic-2: in-progress
+  epic-2: done
   2-1-test-suite-for-find-matches: done
-  2-2-confidence-scoring: review
-  2-3-missed-opportunity-detection-with-impact: review
+  2-2-confidence-scoring: done
+  2-3-missed-opportunity-detection-with-impact: done
   epic-2-retrospective: optional
 
   # Epic 3: Actionable Output
