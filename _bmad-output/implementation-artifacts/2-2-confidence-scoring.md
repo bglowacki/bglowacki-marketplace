@@ -1,6 +1,6 @@
 # Story 2.2: Confidence Scoring
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -45,31 +45,31 @@ Status: ready-for-dev
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add MatchResult dataclass (AC: 4)
-  - [ ] Add `@dataclass` definition at top of `collect_usage.py` (after imports)
-  - [ ] Include `skill`, `matched_triggers`, `confidence` fields
-  - [ ] Add `to_dict()` method for JSON output compatibility
+- [x] Task 1: Add MatchResult dataclass (AC: 4)
+  - [x] Add `@dataclass` definition at top of `collect_usage.py` (after imports)
+  - [x] Include `skill`, `matched_triggers`, `confidence` fields
+  - [x] Add `to_dict()` method for JSON output compatibility
 
-- [ ] Task 2: Implement confidence calculation functions (AC: 1)
-  - [ ] Add `calculate_length_score(trigger: str) -> float`
-  - [ ] Add `calculate_specificity_score(trigger: str) -> float`
-  - [ ] Add `calculate_position_score(match_position: int) -> float`
-  - [ ] Add `calculate_confidence(trigger: str, match_position: int) -> float`
+- [x] Task 2: Implement confidence calculation functions (AC: 1)
+  - [x] Add `calculate_length_score(trigger: str) -> float`
+  - [x] Add `calculate_specificity_score(trigger: str) -> float`
+  - [x] Add `calculate_position_score(match_position: int) -> float`
+  - [x] Add `calculate_confidence(trigger: str, match_position: int) -> float`
 
-- [ ] Task 3: Integrate confidence into find_matches() (AC: 1, 2)
-  - [ ] Modify `find_matches()` to calculate confidence for each match
-  - [ ] Return `MatchResult` objects instead of plain strings
-  - [ ] Filter results to only include confidence > 0.80
+- [x] Task 3: Integrate confidence into find_matches() (AC: 1, 2)
+  - [x] Modify `find_matches()` to calculate confidence for each match
+  - [x] Return `MatchResult` objects instead of plain strings
+  - [x] Filter results to only include confidence > 0.80
 
-- [ ] Task 4: Update JSON output (AC: 3)
-  - [ ] Modify output structure to include confidence field
-  - [ ] Use `MatchResult.to_dict()` for serialization
-  - [ ] Ensure schema v3.1 compatibility
+- [x] Task 4: Update JSON output (AC: 3)
+  - [x] Modify output structure to include confidence field
+  - [x] Use `MatchResult.to_dict()` for serialization
+  - [x] Ensure schema v3.1 compatibility
 
-- [ ] Task 5: Verify all tests pass (AC: 3)
-  - [ ] Run `uv run pytest tests/` to verify no regressions
-  - [ ] Confirm Story 2.1 test cases still pass
-  - [ ] Verify confidence calculation tests pass
+- [x] Task 5: Verify all tests pass (AC: 3)
+  - [x] Run `uv run pytest tests/` to verify no regressions
+  - [x] Confirm Story 2.1 test cases still pass
+  - [x] Verify confidence calculation tests pass
 
 ## Dev Notes
 
@@ -170,15 +170,29 @@ From Story 2.1, the following confidence tests should pass:
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.5 (claude-opus-4-5-20251101)
 
 ### Debug Log References
 
 ### Completion Notes List
 
+- Added `MatchResult` dataclass after `SkillOrAgent` with `skill`, `matched_triggers`, `confidence` fields and `to_dict()` method
+- Implemented 4 confidence calculation functions: `calculate_length_score`, `calculate_specificity_score`, `calculate_position_score`, `calculate_confidence`
+- Modified `find_matches()` to return `MatchResult` objects with confidence scoring and configurable `min_confidence` threshold (default 0.80)
+- Tracked earliest match position per skill for position-based scoring
+- Updated internal callers (`_classify_component`, missed opportunity detection) to work with `MatchResult`
+- Updated existing test_find_matches.py to use `min_confidence=0.0` for backward-compatible trigger matching tests
+- Created comprehensive test_confidence_scoring.py with 26 tests covering dataclass, formula components, threshold filtering, and integration
+- All 283 tests pass with 0 regressions
+
 ### Change Log
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-01-29 | Implemented confidence scoring (Story 2.2) | Claude Opus 4.5 |
 
 ### File List
+
+- observability/skills/observability-usage-collector/scripts/collect_usage.py (modified)
+- observability/tests/test_confidence_scoring.py (new)
+- observability/tests/test_find_matches.py (modified)

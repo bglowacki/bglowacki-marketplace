@@ -133,6 +133,20 @@ class SkillOrAgent:
 
 
 @dataclass
+class MatchResult:
+    skill: SkillOrAgent
+    matched_triggers: list[str]
+    confidence: float  # 0.0 - 1.0
+
+    def to_dict(self) -> dict:
+        return {
+            "skill_name": self.skill.name,
+            "matched_triggers": self.matched_triggers,
+            "confidence": self.confidence,
+        }
+
+
+@dataclass
 class Hook:
     event_type: str  # PreToolUse, PostToolUse, Stop, etc.
     matcher: str  # Tool matcher pattern (e.g., "Bash", "*")
@@ -1762,7 +1776,31 @@ def parse_session_file(session_path: Path) -> SessionData:
     return session_data
 
 
-def find_matches(prompt: str, items: list[SkillOrAgent], min_triggers: int = 2) -> list[tuple[SkillOrAgent, list[str]]]:
+def calculate_length_score(trigger: str) -> float:
+    return min(100, len(trigger) * 10) / 100
+
+
+def calculate_specificity_score(trigger: str) -> float:
+    return 1.0 if " " in trigger or "-" in trigger else 0.5
+
+
+def calculate_position_score(match_position: int) -> float:
+    if match_position <= 20:
+        return 1.0
+    elif match_position >= 200:
+        return 0.0
+    else:
+        return 1.0 - ((match_position - 20) / 180)
+
+
+def calculate_confidence(trigger: str, match_position: int) -> float:
+    length = calculate_length_score(trigger)
+    specificity = calculate_specificity_score(trigger)
+    position = calculate_position_score(match_position)
+    return (length + specificity + position) / 3
+
+
+def find_matches(prompt: str, items: list[SkillOrAgent], min_triggers: int = 2, min_confidence: float = 0.80) -> list[MatchResult]:
     """Find skills/agents that match a prompt based on triggers.
 
     ADR-001 improvements:
@@ -1775,6 +1813,7 @@ def find_matches(prompt: str, items: list[SkillOrAgent], min_triggers: int = 2) 
 
     for item in items:
         matched_triggers = []
+        earliest_position = len(prompt_lower)
         for trigger in item.triggers:
             trigger_lower = trigger.lower()
 
@@ -1795,12 +1834,18 @@ def find_matches(prompt: str, items: list[SkillOrAgent], min_triggers: int = 2) 
                 continue
 
             # Match using word boundaries
-            if re.search(r'\b' + re.escape(trigger_lower) + r'\b', prompt_lower):
+            m = re.search(r'\b' + re.escape(trigger_lower) + r'\b', prompt_lower)
+            if m:
                 matched_triggers.append(trigger)
+                earliest_position = min(earliest_position, m.start())
 
         name_matched = item.name.lower() in [t.lower() for t in matched_triggers]
         if len(matched_triggers) >= min_triggers or name_matched:
-            matches.append((item, matched_triggers))
+            # Calculate confidence using earliest match position and best trigger
+            best_trigger = max(matched_triggers, key=len) if matched_triggers else ""
+            confidence = calculate_confidence(best_trigger, earliest_position)
+            if confidence > min_confidence:
+                matches.append(MatchResult(skill=item, matched_triggers=matched_triggers, confidence=confidence))
 
     return matches
 
@@ -1822,7 +1867,7 @@ def _classify_component(item: SkillOrAgent, sessions: list[SessionData], used_fi
 
     for session in sessions:
         for prompt in session.prompts:
-            matches = find_matches(prompt, [item])
+            matches = find_matches(prompt, [item], min_confidence=0.0)
             if matches:
                 return SkillClassification.DORMANT
 
@@ -1942,7 +1987,8 @@ def analyze_jsonl(
         for prompt in session.prompts:
             matches = find_matches(prompt, all_items)
 
-            for item, triggers in matches:
+            for match in matches:
+                item, triggers = match.skill, match.matched_triggers
                 was_used = False
                 if item.type == "skill" and item.name in session.skills_used:
                     was_used = True

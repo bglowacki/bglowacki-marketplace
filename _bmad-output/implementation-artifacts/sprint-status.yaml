@@ -48,8 +48,8 @@ development_status:
 
   # Epic 2: Missed Opportunity Detection
   epic-2: in-progress
-  2-1-test-suite-for-find-matches: ready-for-dev
-  2-2-confidence-scoring: ready-for-dev
+  2-1-test-suite-for-find-matches: done
+  2-2-confidence-scoring: review
   2-3-missed-opportunity-detection-with-impact: ready-for-dev
   epic-2-retrospective: optional
 
