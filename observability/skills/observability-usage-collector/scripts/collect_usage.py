@@ -61,6 +61,14 @@ FREQ_SOMETIMES_MAX = 10
 _yaml_parse_issues: list[str] = []
 
 
+# Story 1.2: Skill classification constants
+class SkillClassification:
+    """Classification for skill/agent usage status."""
+    ACTIVE = "active"    # Actually invoked in the period
+    DORMANT = "dormant"  # Triggers matched but not invoked
+    UNUSED = "unused"    # No matching triggers found
+
+
 @dataclass
 class SchemaFingerprint:
     """ADR-026: Schema characteristics for detecting JSONL format changes."""
@@ -195,6 +203,8 @@ class SessionData:
     # Workflow tracking
     stages_visited: list[str] = field(default_factory=list)
     session_type: str = "UNKNOWN"  # DEV or READ
+    # Story 1.2 AC-3: Per-project tracking
+    project_path: str = "unknown"
 
 
 # ADR-047: Temporal weighting constants
@@ -1795,6 +1805,108 @@ def find_matches(prompt: str, items: list[SkillOrAgent], min_triggers: int = 2) 
     return matches
 
 
+def _classify_component(item: SkillOrAgent, sessions: list[SessionData], used_field: str) -> str:
+    """Story 1.2 AC-1: Classify a skill or agent based on usage in sessions.
+
+    Returns:
+        - ACTIVE: Component was invoked in at least one session
+        - DORMANT: Triggers matched in prompts but component wasn't invoked
+        - UNUSED: No triggers matched in any session
+    """
+    if not sessions:
+        return SkillClassification.UNUSED
+
+    was_invoked = any(item.name in getattr(s, used_field) for s in sessions)
+    if was_invoked:
+        return SkillClassification.ACTIVE
+
+    for session in sessions:
+        for prompt in session.prompts:
+            matches = find_matches(prompt, [item])
+            if matches:
+                return SkillClassification.DORMANT
+
+    return SkillClassification.UNUSED
+
+
+def classify_skill(skill: SkillOrAgent, sessions: list[SessionData]) -> str:
+    return _classify_component(skill, sessions, "skills_used")
+
+
+def classify_agent(agent: SkillOrAgent, sessions: list[SessionData]) -> str:
+    return _classify_component(agent, sessions, "agents_used")
+
+
+def _get_component_usage_stats(item: SkillOrAgent, sessions: list[SessionData], used_field: str) -> tuple[int, list[str], str | None, str | None]:
+    """Story 1.2 AC-2 & AC-4: Get usage count, sessions_used, and timestamps for a component.
+
+    Returns:
+        Tuple of (usage_count, list of session IDs, first_used ISO string or None, last_used ISO string or None)
+    """
+    used_sessions = [s for s in sessions if item.name in getattr(s, used_field)]
+    sessions_used = [s.session_id for s in used_sessions]
+
+    if not used_sessions:
+        return 0, [], None, None
+
+    dated_sessions = [s for s in used_sessions if s.session_date is not None]
+    if not dated_sessions:
+        return len(sessions_used), sessions_used, None, None
+
+    first_used = min(s.session_date for s in dated_sessions)
+    last_used = max(s.session_date for s in dated_sessions)
+
+    return (
+        len(sessions_used),
+        sessions_used,
+        first_used.isoformat() if first_used else None,
+        last_used.isoformat() if last_used else None,
+    )
+
+
+def get_skill_usage_stats(skill: SkillOrAgent, sessions: list[SessionData]) -> tuple[int, list[str], str | None, str | None]:
+    return _get_component_usage_stats(skill, sessions, "skills_used")
+
+
+def get_agent_usage_stats(agent: SkillOrAgent, sessions: list[SessionData]) -> tuple[int, list[str], str | None, str | None]:
+    return _get_component_usage_stats(agent, sessions, "agents_used")
+
+
+def compute_per_project_breakdown(sessions: list[SessionData]) -> dict:
+    """Story 1.2 AC-3: Compute per-project usage breakdown.
+
+    Groups sessions by project_path and computes skill/agent usage for each project.
+
+    Returns:
+        Dict mapping project_path to usage data including sessions, skills_used, agents_used
+    """
+    per_project: dict[str, dict] = {}
+
+    for session in sessions:
+        project = session.project_path
+        if project not in per_project:
+            per_project[project] = {
+                "sessions": 0,
+                "skills_used": defaultdict(int),
+                "agents_used": defaultdict(int),
+            }
+
+        per_project[project]["sessions"] += 1
+
+        for skill_name in session.skills_used:
+            per_project[project]["skills_used"][skill_name] += 1
+
+        for agent_name in session.agents_used:
+            per_project[project]["agents_used"][agent_name] += 1
+
+    # Convert defaultdicts to regular dicts for JSON serialization
+    for project in per_project:
+        per_project[project]["skills_used"] = dict(per_project[project]["skills_used"])
+        per_project[project]["agents_used"] = dict(per_project[project]["agents_used"])
+
+    return per_project
+
+
 def analyze_jsonl(
     skills: list[SkillOrAgent],
     agents: list[SkillOrAgent],
@@ -1907,14 +2019,45 @@ def generate_analysis_json(
     # ADR-054: Pre-compute deterministic findings
     pre_computed = compute_pre_computed_findings(skills, agents, commands, sessions, missed, setup_profile)
 
+    # Story 1.2 AC-2 & AC-4: Build skill/agent discovery with usage stats and timestamps
+    def build_skill_discovery(s: SkillOrAgent) -> dict:
+        usage_count, sessions_used, first_used, last_used = get_skill_usage_stats(s, sessions)
+        return {
+            "name": s.name,
+            "description": s.description,
+            "triggers": s.triggers,
+            "source": s.source_type,
+            "classification": classify_skill(s, sessions),
+            "usage_count": usage_count,
+            "sessions_used": sessions_used,
+            "first_used": first_used,
+            "last_used": last_used,
+        }
+
+    def build_agent_discovery(a: SkillOrAgent) -> dict:
+        usage_count, sessions_used, first_used, last_used = get_agent_usage_stats(a, sessions)
+        return {
+            "name": a.name,
+            "description": a.description,
+            "triggers": a.triggers,
+            "source": a.source_type,
+            "classification": classify_agent(a, sessions),
+            "usage_count": usage_count,
+            "sessions_used": sessions_used,
+            "first_used": first_used,
+            "last_used": last_used,
+        }
+
     return {
         "_schema": {
             "description": "Claude Code usage analysis data for agent interpretation",
-            "version": "3.10",  # Added invalid_yaml_files to pre_computed_findings
+            "version": "3.11",  # Story 1.2: Added classification, usage counts, timestamps, per_project
+            "collection_timestamp": datetime.now().isoformat(),  # Story 1.2 AC-5
             "sections": {
                 "discovery": "All available skills, agents, commands, and hooks discovered from global, project, and plugin sources",
                 "sessions": "Parsed session data showing what was actually used",
                 "stats": "Aggregated statistics on usage, outcomes, interruptions with followup context, and missed opportunities",
+                "per_project": "Story 1.2: Per-project breakdown with sessions and skill/agent usage",
                 "data_sufficiency": "ADR-050: Statistical sufficiency assessment for pattern detection",
                 "quality_metrics": "ADR-053: Analysis quality metrics for self-evaluation",
                 "pre_computed_findings": "ADR-054: Deterministic findings (100% certain, no LLM needed)",
@@ -1935,24 +2078,8 @@ def generate_analysis_json(
         },
 
         "discovery": {
-            "skills": [
-                {
-                    "name": s.name,
-                    "description": s.description,
-                    "triggers": s.triggers,
-                    "source": s.source_type,
-                }
-                for s in skills
-            ],
-            "agents": [
-                {
-                    "name": a.name,
-                    "description": a.description,
-                    "triggers": a.triggers,
-                    "source": a.source_type,
-                }
-                for a in agents
-            ],
+            "skills": [build_skill_discovery(s) for s in skills],
+            "agents": [build_agent_discovery(a) for a in agents],
             "commands": [
                 {
                     "name": c.name,
@@ -2032,6 +2159,9 @@ def generate_analysis_json(
                 for it in s.interrupted_tools
             ][:20],  # Limit to 20 most recent
         },
+
+        # Story 1.2 AC-3: Per-project breakdown
+        "per_project": compute_per_project_breakdown(sessions),
 
         # ADR-050: Statistical significance assessment
         "data_sufficiency": data_sufficiency,
@@ -2428,6 +2558,9 @@ def main():
 
     if session_files:
         sessions = [parse_session_file(f) for f in session_files]
+        # Story 1.2 AC-3: Set project_path on each session for per-project breakdown
+        for s in sessions:
+            s.project_path = project_path
         total_prompts = sum(len(s.prompts) for s in sessions)
         print(f"  ✓ Parsed {len(sessions)} sessions ({total_prompts} prompts)", file=sys.stderr)
     else:
