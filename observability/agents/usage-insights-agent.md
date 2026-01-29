@@ -192,6 +192,88 @@ Focus your LLM analysis on:
 - Prioritization and recommendations
 - Natural language explanations
 
+## Empty State Handling
+
+Before proceeding to analysis, check for empty states in this order. If an empty state is detected, output the appropriate message and STOP (do not continue to detailed analysis).
+
+### Check 1: No Sessions (AC-1)
+
+**Condition:** `total_sessions == 0` or no session data in JSON input
+
+**Output:**
+```markdown
+## No Session Data Found
+
+**No sessions found in the last {days} days.**
+
+This could mean:
+- You haven't used Claude Code recently
+- Session logs aren't being saved to `~/.claude/projects/`
+
+**Try:** Extend the analysis range with `--days 14` or `--days 30`
+```
+
+**Action:** STOP analysis here. No further sections should render.
+
+### Check 2: No Skills Installed (AC-4)
+
+**Condition:** `skills_discovered == 0` AND `agents_discovered == 0` AND `commands_discovered == 0` (from `setup_profile` or `discovery`)
+
+**Output:**
+```markdown
+## No Skills or Agents Found
+
+**No skills or agents found.**
+
+The collector couldn't find any installed skills, agents, or commands.
+
+**To get started:**
+1. Install skills from the Claude Code marketplace
+2. Create custom skills in `~/.claude/skills/`
+3. See the Claude Code documentation for getting started with skills and agents
+```
+
+**Action:** STOP analysis here. No further sections should render.
+
+### Check 3: No Missed Opportunities (AC-2)
+
+**Condition:** Sessions exist but `missed_opportunities` / `potential_matches_detailed` is empty or all entries have 0 matches
+
+**Output:**
+```markdown
+## All Systems Healthy
+
+**Great news! Your setup is working well.**
+
+- Sessions analyzed: {total_sessions}
+- Skills discovered: {skills_count}
+- Agents discovered: {agents_count}
+- No missed opportunities detected
+
+Your skills and agents are being triggered appropriately. Keep up the good work!
+```
+
+**Action:** Show Plugin Efficiency (Phase 0) and Setup Summary (Phase 1), then STOP. Skip Phases 2-4 (no findings to expand).
+
+### Check 4: Parsing Errors (AC-3)
+
+**Condition:** `metadata` or `stats` contains parsing errors or `errors_count > 0`
+
+**Output** (shown as a note before normal analysis, does NOT stop analysis):
+```markdown
+> **Note:** {N} sessions had parsing issues and were excluded from analysis. Results are based on {total_sessions - N} successfully parsed sessions.
+```
+
+**Action:** Continue with normal analysis. This is informational only.
+
+### Graceful Section Rendering (AC-3)
+
+When rendering any section, check if data exists before outputting:
+- **Do NOT** render empty tables (no rows)
+- **Do NOT** render sections with zero findings
+- **Do NOT** render "Improvement Categories" if all categories have 0 issues
+- Instead, skip the section silently or show "No issues found" as appropriate
+
 ## Improvement Categories
 
 Group all findings into these 5 categories:
@@ -213,7 +295,11 @@ Group all findings into these 5 categories:
 
 ## Analysis Workflow
 
-### Phase 0: Plugin Efficiency (ALWAYS DO FIRST)
+### Pre-Phase: Empty State Checks (ALWAYS DO FIRST)
+
+Before any analysis, run through the **Empty State Handling** checks above in order (Check 1 → 2 → 3 → 4). If Check 1 or Check 2 triggers, STOP entirely. If Check 3 triggers, show the healthy message, then continue to Phase 0 (Plugin Efficiency) and Phase 1 (Setup Summary) only — skip Phases 2-4. Check 4 is informational and does not block.
+
+### Phase 0: Plugin Efficiency
 
 Check `setup_profile.plugin_usage` which now includes enabled/disabled state awareness:
 - **active**: Used in sessions

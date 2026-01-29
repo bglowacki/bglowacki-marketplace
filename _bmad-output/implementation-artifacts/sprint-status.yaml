@@ -55,7 +55,7 @@ development_status:
 
   # Epic 3: Actionable Output
   epic-3: in-progress
-  3-1-empty-state-handling: ready-for-dev
+  3-1-empty-state-handling: done
   3-2-summary-dashboard: ready-for-dev
   3-3-findings-walk-through: ready-for-dev
   3-4-safe-cleanup-mode: ready-for-dev

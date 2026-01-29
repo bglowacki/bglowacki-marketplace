@@ -1,6 +1,6 @@
 # Story 3.1: Empty State Handling
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -36,31 +36,31 @@ Status: ready-for-dev
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add empty session handling (AC: 1)
-  - [ ] Check if `total_sessions == 0` in JSON input
-  - [ ] Display: "No sessions found in the last {N} days"
-  - [ ] Suggest: "Try extending the range with `--days 14` or `--days 30`"
+- [x] Task 1: Add empty session handling (AC: 1)
+  - [x] Check if `total_sessions == 0` in JSON input
+  - [x] Display: "No sessions found in the last {N} days"
+  - [x] Suggest: "Try extending the range with `--days 14` or `--days 30`"
 
-- [ ] Task 2: Add positive confirmation for healthy state (AC: 2)
-  - [ ] Check if `missed_opportunities` array is empty
-  - [ ] Display: "All systems healthy - no missed opportunities detected"
-  - [ ] Show brief usage stats as positive reinforcement
+- [x] Task 2: Add positive confirmation for healthy state (AC: 2)
+  - [x] Check if `missed_opportunities` array is empty
+  - [x] Display: "All systems healthy - no missed opportunities detected"
+  - [x] Show brief usage stats as positive reinforcement
 
-- [ ] Task 3: Handle minimal data gracefully (AC: 3)
-  - [ ] Check for parsing errors in metadata
-  - [ ] If errors exist, show summary: "Note: {N} sessions had parsing issues"
-  - [ ] Ensure no empty tables/sections render (hide if no data)
+- [x] Task 3: Handle minimal data gracefully (AC: 3)
+  - [x] Check for parsing errors in metadata
+  - [x] If errors exist, show summary: "Note: {N} sessions had parsing issues"
+  - [x] Ensure no empty tables/sections render (hide if no data)
 
-- [ ] Task 4: Add no-skills-installed handling (AC: 4)
-  - [ ] Check if `skills_discovered == 0` and `agents_discovered == 0`
-  - [ ] Display: "No skills or agents installed"
-  - [ ] Provide guidance: "Install skills from the marketplace or create custom ones"
+- [x] Task 4: Add no-skills-installed handling (AC: 4)
+  - [x] Check if `skills_discovered == 0` and `agents_discovered == 0`
+  - [x] Display: "No skills or agents installed"
+  - [x] Provide guidance: "Install skills from the marketplace or create custom ones"
 
-- [ ] Task 5: Test all empty states (AC: 1-4)
-  - [ ] Manually test with empty JSON input
-  - [ ] Test with zero sessions
-  - [ ] Test with sessions but no matches
-  - [ ] Test with parsing errors present
+- [x] Task 5: Test all empty states (AC: 1-4)
+  - [x] Manually test with empty JSON input
+  - [x] Test with zero sessions
+  - [x] Test with sessions but no matches
+  - [x] Test with parsing errors present
 
 ## Dev Notes
 
@@ -153,15 +153,29 @@ Can be implemented in parallel with Epic 1 and Epic 2.
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.5 (claude-opus-4-5-20251101)
 
 ### Debug Log References
 
+None - clean implementation with no issues.
+
 ### Completion Notes List
+
+- Added "Empty State Handling" section to usage-insights-agent.md with 4 ordered checks: no sessions, no skills, no missed opportunities, and parsing errors
+- Added "Pre-Phase: Empty State Checks" reference in Analysis Workflow to ensure checks run before any analysis
+- Added "Graceful Section Rendering" rules to prevent empty tables/sections from rendering
+- Check 1 (no sessions) and Check 2 (no skills) are STOP conditions — no further analysis proceeds
+- Check 3 (healthy state) shows positive message and skips detailed findings
+- Check 4 (parsing errors) is informational only — analysis continues
+- All 306 existing tests pass with no regressions
 
 ### Change Log
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-01-29 | Added empty state handling (4 checks), graceful rendering rules, and pre-phase workflow step to usage-insights-agent.md | Claude Opus 4.5 |
+| 2026-01-29 | Code review: fixed 4 issues — AC-4 condition now includes commands, resolved Check 3 vs Pre-Phase contradiction, removed conflicting "ALWAYS DO FIRST" on Phase 0, replaced hardcoded URL with generic doc reference | Claude Opus 4.5 (Review) |
 
 ### File List
+
+- observability/agents/usage-insights-agent.md (modified)
