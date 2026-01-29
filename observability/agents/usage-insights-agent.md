@@ -293,6 +293,94 @@ Group all findings into these 5 categories:
 - **Medium**: Category has 2-4 issues
 - **Low**: Category has 1 issue
 
+## Safe Cleanup Mode (Story 3.4)
+
+Cleanup mode controls whether deletion recommendations appear. Check `_schema.cleanup_mode` in the JSON input.
+
+### When Cleanup Mode is OFF (Default)
+
+Show unused skills for **informational purposes only**. Never suggest deletion.
+
+```markdown
+### Unused Skills (Informational Only)
+
+The following skills had no trigger matches in the analysis period:
+- {skill_1} (last used: never/unknown)
+- {skill_2} (last used: never/unknown)
+
+**Note:** These are shown for information only. Enable cleanup mode (`--cleanup`) for removal suggestions.
+```
+
+### When Cleanup Mode is ON
+
+Check `pre_computed_findings.cleanup_insufficient_data`:
+
+**If `cleanup_insufficient_data` is true** (< 20 sessions analyzed):
+
+```markdown
+### Cleanup Mode: Insufficient Data
+
+You've enabled cleanup mode, but only {N} sessions were analyzed.
+
+**Minimum required:** 20 sessions
+**Current:** {N} sessions
+
+To get cleanup recommendations:
+- Extend analysis period: `--days 30` or `--days 60`
+- Wait for more usage data to accumulate
+
+**Why this threshold?** Short analysis periods can miss:
+- Seasonal skills (monthly deployments, quarterly reports)
+- Project-specific skills (dormant projects)
+- Safety-net skills (rarely used but critical)
+```
+
+**Do NOT suggest any deletions when insufficient data.**
+
+**If sufficient data exists**, present each `cleanup_candidates` entry using this template:
+
+```markdown
+---
+### 🔴 REVIEW CAREFULLY: Potential Unused Skill
+
+**Skill:** {name}
+**Source:** {source} ({type})
+
+**Safety Check:**
+- [x] Zero trigger matches in analysis period
+- [x] No hard dependencies found
+- [x] {session_count} sessions analyzed (threshold: 20)
+
+**Assessment:** This skill has not been triggered across {session_count} sessions. It MAY be unused.
+
+**IMPORTANT:** This is NOT a "safe to delete" recommendation. Review carefully:
+- Is this skill seasonal? (e.g., deployment skills used monthly)
+- Is this skill project-specific? (might be needed in other projects)
+- Is this a safety net? (e.g., rollback scripts rarely used but critical)
+
+**If you decide to remove:**
+{rollback_guidance}
+
+**Options:** [Skip] [More Detail]
+```
+
+### Safety Classification Levels
+
+| Level | Criteria | User Sees |
+|-------|----------|-----------|
+| **NEVER SUGGEST** | Has trigger matches in period | Nothing (not mentioned for deletion) |
+| **INSUFFICIENT DATA** | Cleanup mode ON but <20 sessions | Warning message, no suggestions |
+| **REVIEW CAREFULLY** | Zero triggers + no deps + cleanup ON + >= 20 sessions | Careful deletion suggestion |
+
+### Rollback Guidance by Source
+
+Each cleanup candidate includes `rollback_guidance` from the collector:
+- **Global skills**: Reinstall from marketplace
+- **Project skills**: Restore from git history
+- **Plugin skills**: Reinstall plugin
+
+**CRITICAL:** Never say "safe to delete". Always use "REVIEW CAREFULLY" framing.
+
 ## Summary Dashboard
 
 **CRITICAL: Always present this dashboard FIRST before any detailed analysis or drill-down.**

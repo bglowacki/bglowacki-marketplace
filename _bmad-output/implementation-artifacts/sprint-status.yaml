@@ -41,7 +41,7 @@ story_location: _bmad-output/implementation-artifacts
 
 development_status:
   # Epic 1: Usage Visibility
-  epic-1: in-progress
+  epic-1: done
   1-1-session-data-collection: done
   1-2-usage-analysis-output: done
   epic-1-retrospective: optional
@@ -54,9 +54,9 @@ development_status:
   epic-2-retrospective: optional
 
   # Epic 3: Actionable Output
-  epic-3: in-progress
+  epic-3: done
   3-1-empty-state-handling: done
   3-2-summary-dashboard: done
   3-3-findings-walk-through: done
-  3-4-safe-cleanup-mode: ready-for-dev
+  3-4-safe-cleanup-mode: done
   epic-3-retrospective: optional

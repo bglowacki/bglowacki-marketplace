@@ -1,6 +1,6 @@
 # Story 3.4: Safe Cleanup Mode
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -39,32 +39,32 @@ Status: ready-for-dev
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add cleanup mode flag detection (AC: 1)
-  - [ ] Check for `--cleanup` flag or config setting
-  - [ ] Default to cleanup mode OFF
-  - [ ] Show "Unused" category without deletion suggestions when OFF
+- [x] Task 1: Add cleanup mode flag detection (AC: 1)
+  - [x] Check for `--cleanup` flag or config setting
+  - [x] Default to cleanup mode OFF
+  - [x] Show "Unused" category without deletion suggestions when OFF
 
-- [ ] Task 2: Implement safety classification (AC: 2)
-  - [ ] Check zero trigger matches condition
-  - [ ] Check no hard dependencies condition
-  - [ ] Check >= 20 sessions threshold (NFR-8)
-  - [ ] Only proceed if ALL conditions met
+- [x] Task 2: Implement safety classification (AC: 2)
+  - [x] Check zero trigger matches condition
+  - [x] Check no hard dependencies condition
+  - [x] Check >= 20 sessions threshold (NFR-8)
+  - [x] Only proceed if ALL conditions met
 
-- [ ] Task 3: Create cleanup finding template (AC: 2, 3)
-  - [ ] Header: "REVIEW CAREFULLY"
-  - [ ] Show safety classification level
-  - [ ] Include rollback guidance
-  - [ ] Never say "safe to delete"
+- [x] Task 3: Create cleanup finding template (AC: 2, 3)
+  - [x] Header: "REVIEW CAREFULLY"
+  - [x] Show safety classification level
+  - [x] Include rollback guidance
+  - [x] Never say "safe to delete"
 
-- [ ] Task 4: Implement insufficient data handling (AC: 4)
-  - [ ] Check session count against threshold (20)
-  - [ ] If below: Show warning, block cleanup suggestions
-  - [ ] Display: "Extend analysis period for cleanup recommendations"
+- [x] Task 4: Implement insufficient data handling (AC: 4)
+  - [x] Check session count against threshold (20)
+  - [x] If below: Show warning, block cleanup suggestions
+  - [x] Display: "Extend analysis period for cleanup recommendations"
 
-- [ ] Task 5: Add rollback guidance templates (AC: 3)
-  - [ ] For global skills: Reinstall from marketplace
-  - [ ] For project skills: Restore from git history
-  - [ ] For plugin skills: Reinstall plugin
+- [x] Task 5: Add rollback guidance templates (AC: 3)
+  - [x] For global skills: Reinstall from marketplace
+  - [x] For project skills: Restore from git history
+  - [x] For plugin skills: Reinstall plugin
 
 ## Dev Notes
 
@@ -183,15 +183,31 @@ observability/agents/usage-insights-agent.md
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.5 (claude-opus-4-5-20251101)
 
 ### Debug Log References
 
 ### Completion Notes List
 
+- Added `--cleanup` CLI flag to collector (default: OFF)
+- Added `cleanup_mode` boolean to JSON schema `_schema` section (v3.13)
+- Implemented `_rollback_guidance()` helper generating source-specific restore instructions
+- Added `CLEANUP_MIN_SESSIONS = 20` constant for session threshold
+- Extended `compute_pre_computed_findings()` with cleanup candidate logic: checks cleanup_mode, session threshold, excludes skills with trigger matches (from missed opportunities and jsonl_stats)
+- Cleanup candidates include: name, type, source, safety_level ("REVIEW CAREFULLY"), session_count, rollback_guidance
+- Added `cleanup_insufficient_data` flag when <20 sessions with cleanup mode ON
+- Updated `usage-insights-agent.md` with Safe Cleanup Mode section: templates for cleanup OFF, insufficient data, and REVIEW CAREFULLY findings
+- 12 new tests covering all ACs: flag detection, safety classification, insufficient data, rollback guidance by source type
+- All 365 tests pass with 0 regressions
+
 ### Change Log
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-01-29 | Implemented safe cleanup mode: --cleanup flag, safety classification, templates, insufficient data handling | Dev Agent (Opus 4.5) |
 
 ### File List
+
+- observability/skills/observability-usage-collector/scripts/collect_usage.py (modified)
+- observability/agents/usage-insights-agent.md (modified)
+- observability/tests/test_safe_cleanup.py (new)

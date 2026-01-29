@@ -1,6 +1,6 @@
 # Story 2.3: Missed Opportunity Detection with Impact
 
-Status: review
+Status: done
 
 ## Story
 

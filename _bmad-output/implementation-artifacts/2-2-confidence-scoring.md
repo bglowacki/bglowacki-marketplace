@@ -1,6 +1,6 @@
 # Story 2.2: Confidence Scoring
 
-Status: review
+Status: done
 
 ## Story
 

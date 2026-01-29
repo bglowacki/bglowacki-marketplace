@@ -237,6 +237,20 @@ MIN_SESSIONS_FOR_PATTERN = 5  # Need at least 5 sessions for pattern detection
 MIN_OCCURRENCES_FOR_SIGNIFICANCE = 3  # Need at least 3 occurrences to report
 
 
+def _rollback_guidance(source_type: str) -> str:
+    """Story 3.4: Generate rollback guidance based on source type."""
+    if source_type == "project":
+        return "Restore from git history: git checkout HEAD~1 -- <skill_path>"
+    elif source_type.startswith("plugin:"):
+        plugin_name = source_type.split(":", 1)[1] if ":" in source_type else source_type
+        return f"Reinstall plugin: {plugin_name}"
+    else:
+        return "Reinstall from marketplace: claude-code install <skill_name>"
+
+
+CLEANUP_MIN_SESSIONS = 20
+
+
 def compute_pre_computed_findings(
     skills: list,
     agents: list,
@@ -244,6 +258,8 @@ def compute_pre_computed_findings(
     sessions: list,
     missed: list,
     setup_profile,
+    cleanup_mode: bool = False,
+    jsonl_stats: dict | None = None,
 ) -> dict:
     """ADR-054: Pre-compute deterministic findings that don't need LLM.
 
@@ -293,7 +309,39 @@ def compute_pre_computed_findings(
                 "finding_hash": m.finding_hash,
             })
 
-    return {
+    # Story 3.4: Safe cleanup mode
+    session_count = len(sessions)
+    cleanup_candidates = []
+    cleanup_insufficient_data = False
+
+    if cleanup_mode:
+        if session_count < CLEANUP_MIN_SESSIONS:
+            cleanup_insufficient_data = True
+        else:
+            # Build set of skills/agents with trigger matches or actual usage
+            matched_names = set()
+            for m in missed:
+                matched_names.add(m.matched_item.name)
+            if jsonl_stats:
+                for name in jsonl_stats.get("missed_skills", {}):
+                    matched_names.add(name)
+                for name in jsonl_stats.get("missed_agents", {}):
+                    matched_names.add(name)
+            for name in used_skills | used_agents:
+                matched_names.add(name)
+
+            for item in never_used:
+                if item["name"] not in matched_names:
+                    cleanup_candidates.append({
+                        "name": item["name"],
+                        "type": item["type"],
+                        "source": item["source"],
+                        "safety_level": "REVIEW CAREFULLY",
+                        "session_count": session_count,
+                        "rollback_guidance": _rollback_guidance(item["source"]),
+                    })
+
+    result = {
         "_note": "Deterministic findings - 100% certain, no LLM inference needed",
         "empty_descriptions": empty_descriptions[:20],  # Limit
         "never_used": never_used[:20],  # Limit
@@ -311,6 +359,12 @@ def compute_pre_computed_findings(
             "invalid_yaml_files": len(_yaml_parse_issues),
         },
     }
+
+    if cleanup_mode:
+        result["cleanup_candidates"] = cleanup_candidates[:20]
+        result["cleanup_insufficient_data"] = cleanup_insufficient_data
+
+    return result
 
 
 def compute_quality_metrics(
@@ -1884,8 +1938,6 @@ def detect_missed_opportunities(
 
     for session in sessions:
         for skill in skills:
-            matches = find_matches(session.prompts[0] if session.prompts else "", [skill])
-            # Check all prompts in session
             session_matched = False
             best_confidence = 0.0
             matched_prompt = ""
@@ -1898,7 +1950,7 @@ def detect_missed_opportunities(
                             best_confidence = m.confidence
                             matched_prompt = prompt
 
-            was_invoked = skill.name in session.skills_used
+            was_invoked = skill.name in session.skills_used or skill.name in session.agents_used
 
             if session_matched and not was_invoked and best_confidence > CONFIDENCE_HIGH:
                 if skill.name not in grouped:
@@ -2133,6 +2185,7 @@ def generate_analysis_json(
     setup_profile: SetupProfile,
     missed: list[MissedOpportunity],  # ADR-046: Include for confidence data
     feedback: dict,  # ADR-048: User feedback
+    cleanup_mode: bool = False,  # Story 3.4: Safe cleanup mode
 ) -> dict:
     """Generate rich JSON output for agent interpretation."""
 
@@ -2162,7 +2215,7 @@ def generate_analysis_json(
     quality_metrics = compute_quality_metrics(sessions, missed, feedback)
 
     # ADR-054: Pre-compute deterministic findings
-    pre_computed = compute_pre_computed_findings(skills, agents, commands, sessions, missed, setup_profile)
+    pre_computed = compute_pre_computed_findings(skills, agents, commands, sessions, missed, setup_profile, cleanup_mode, jsonl_stats)
 
     # Story 2.3: Detect missed opportunities grouped by skill with impact scores
     missed_opportunities = detect_missed_opportunities(sessions, skills + agents)
@@ -2199,7 +2252,8 @@ def generate_analysis_json(
     return {
         "_schema": {
             "description": "Claude Code usage analysis data for agent interpretation",
-            "version": "3.12",  # Story 2.3: Added missed_opportunities with impact scoring
+            "version": "3.13",  # Story 3.4: Safe cleanup mode
+            "cleanup_mode": cleanup_mode,  # Story 3.4: Whether cleanup suggestions are enabled
             "collection_timestamp": datetime.now().isoformat(),  # Story 1.2 AC-5
             "sections": {
                 "discovery": "All available skills, agents, commands, and hooks discovered from global, project, and plugin sources",
@@ -2621,6 +2675,7 @@ def main():
     parser.add_argument("--project", help="Project path (default: current directory)")
     parser.add_argument("--quick-stats", action="store_true", help="Show quick stats from session summaries")
     parser.add_argument("--days", type=int, default=DEFAULT_DAYS, help=f"Days to include in quick stats (default: {DEFAULT_DAYS})")
+    parser.add_argument("--cleanup", action="store_true", help="Enable safe cleanup mode for deletion suggestions")
     args = parser.parse_args()
 
     cwd = Path.cwd()
@@ -2764,7 +2819,8 @@ def main():
     # Output
     if args.format == "json":
         output = generate_analysis_json(
-            skills, agents, commands, hooks, sessions, jsonl_stats, claude_md, setup_profile, missed, feedback
+            skills, agents, commands, hooks, sessions, jsonl_stats, claude_md, setup_profile, missed, feedback,
+            cleanup_mode=args.cleanup,
         )
         print(json.dumps(output, indent=2))
     elif args.format == "dashboard":
