@@ -1,6 +1,6 @@
 # Story 3.2: Summary Dashboard
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -37,32 +37,32 @@ Status: ready-for-dev
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Design dashboard structure (AC: 1, 2)
-  - [ ] Define Stats tier content (sessions, skills, classification counts)
-  - [ ] Define Top 3 tier content (highest impact items)
-  - [ ] Define Categories tier content (grouped counts)
+- [x] Task 1: Design dashboard structure (AC: 1, 2)
+  - [x] Define Stats tier content (sessions, skills, classification counts)
+  - [x] Define Top 3 tier content (highest impact items)
+  - [x] Define Categories tier content (grouped counts)
 
-- [ ] Task 2: Implement Stats tier (AC: 2)
-  - [ ] Extract `total_sessions` from JSON
-  - [ ] Count Active/Dormant/Unused skills from `skill_analysis`
-  - [ ] Calculate percentages for each category
-  - [ ] Display period analyzed (days)
+- [x] Task 2: Implement Stats tier (AC: 2)
+  - [x] Extract `total_sessions` from JSON
+  - [x] Count Active/Dormant/Unused skills from `skill_analysis`
+  - [x] Calculate percentages for each category
+  - [x] Display period analyzed (days)
 
-- [ ] Task 3: Implement Top 3 tier (AC: 2, 4)
-  - [ ] Sort `missed_opportunities` by `impact_score` descending
-  - [ ] Take top 3 items
-  - [ ] Display with emoji indicators (red/yellow/green)
-  - [ ] Show impact score and brief description
+- [x] Task 3: Implement Top 3 tier (AC: 2, 4)
+  - [x] Sort `missed_opportunities` by `impact_score` descending
+  - [x] Take top 3 items
+  - [x] Display with emoji indicators (red/yellow/green)
+  - [x] Show impact score and brief description
 
-- [ ] Task 4: Implement Categories tier (AC: 2)
-  - [ ] Group findings: Missed Opportunities, Dormant Skills, Unused Skills
-  - [ ] Show count per category
-  - [ ] Present as selectable options
+- [x] Task 4: Implement Categories tier (AC: 2)
+  - [x] Group findings: Missed Opportunities, Dormant Skills, Unused Skills
+  - [x] Show count per category
+  - [x] Present as selectable options
 
-- [ ] Task 5: Implement category drill-down (AC: 3)
-  - [ ] When user selects category, list items one-by-one
-  - [ ] For each item, offer: Accept, Skip, More Detail
-  - [ ] Track which items have been reviewed
+- [x] Task 5: Implement category drill-down (AC: 3)
+  - [x] When user selects category, list items one-by-one
+  - [x] For each item, offer: Accept, Skip, More Detail
+  - [x] Track which items have been reviewed
 
 ## Dev Notes
 
@@ -157,15 +157,32 @@ observability/agents/usage-insights-agent.md
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.5
 
 ### Debug Log References
 
 ### Completion Notes List
 
+- Added "Summary Dashboard" section to usage-insights-agent.md before Analysis Workflow
+- Dashboard defines three tiers: Quick Stats, Top 3 Recommendations, Categories
+- Stats tier extracts total_sessions, classification counts (active/dormant/unused) with percentages
+- Top 3 tier sorts missed_opportunities by impact_score descending, uses emoji indicators
+- Categories tier groups findings into Missed Opportunities, Dormant Skills, Unused Skills
+- Category drill-down presents findings one-by-one with Accept/Skip/More Detail options
+- Added 20 structural tests in test_summary_dashboard.py validating all AC requirements
+- All tests pass with no regressions
+- Code review round 1: Fixed 5 issues (2 HIGH, 3 MEDIUM) — dashboard rendering order, category alignment, test precision, zero-count handling, period derivation
+- Code review round 2: Fixed drill-down data extraction gap (H-2), period fallback precision (M-4), added tier ordering test (M-3)
+
 ### Change Log
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-01-29 | Implemented summary dashboard with 3-tier structure and category drill-down | Claude Opus 4.5 |
+| 2026-01-29 | Code review: fixed dashboard rendering order, category alignment, test precision, zero-count handling, period derivation | Claude Opus 4.5 |
+| 2026-01-29 | Code review round 2: added drill-down data extraction table (H-2), precise period fallback (M-4), tier ordering tests (M-3), cleaned completion notes (M-2) | Claude Opus 4.5 |
 
 ### File List
+
+- observability/agents/usage-insights-agent.md (modified - added Summary Dashboard section with drill-down data extraction)
+- observability/tests/test_summary_dashboard.py (new - 23 structural tests)

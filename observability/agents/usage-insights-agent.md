@@ -293,11 +293,279 @@ Group all findings into these 5 categories:
 - **Medium**: Category has 2-4 issues
 - **Low**: Category has 1 issue
 
+## Summary Dashboard
+
+**CRITICAL: Always present this dashboard FIRST before any detailed analysis or drill-down.**
+
+After completing empty state checks, render this summary dashboard as the entry point for all analysis output.
+
+### Dashboard Template
+
+```markdown
+## Usage Analysis Summary
+
+**Period:** Last {N} days | **Sessions:** {total_sessions} | **Projects:** {project_count}
+
+### Quick Stats
+- Active skills: {active_count}/{total_skills} ({active_pct}%)
+- Dormant skills: {dormant_count}/{total_skills} (triggers matched, never used)
+- Unused skills: {unused_count}/{total_skills} (no trigger matches)
+- Missed opportunities: {missed_opp_count} (high confidence)
+
+### Top 3 Recommendations (by impact score)
+1. 🔴 **{item_name}** (impact: {impact_score})
+   {brief_description}
+2. 🟡 **{item_name}** (impact: {impact_score})
+   {brief_description}
+3. 🟢 **{item_name}** (impact: {impact_score})
+   {brief_description}
+
+### Categories
+Select a category to explore:
+[1] Missed Opportunities ({count})
+[2] Dormant Skills ({count})
+[3] Unused Skills ({count})
+[4] Full Report
+```
+
+### Stats Tier (Quick Stats)
+
+Extract from collector JSON:
+- `stats.total_sessions` → total sessions count
+- `discovery.skills` → count by `classification` field: `active`, `dormant`, `unused`
+- Calculate percentages: `count / total_skills * 100`
+- `_schema.collection_period_days` → analysis period in days (falls back to `collection_args.days` if present, otherwise calculate as `(collection_timestamp - min(sessions[*].timestamp)) / 86400` rounded up)
+- Count of `missed_opportunities` entries with `confidence >= 0.8` → high confidence missed opportunities
+
+### Top 3 Tier (Recommendations)
+
+Extract from `missed_opportunities` array:
+1. Sort by `impact_score` descending
+2. Take top 3 items
+3. Assign emoji by rank position:
+   - Position 1: 🔴 (highest impact)
+   - Position 2: 🟡 (medium impact)
+   - Position 3: 🟢 (lower impact)
+4. Display `skill_name`, `impact_score` (as decimal), and first entry from `example_prompts`
+5. If fewer than 3 missed opportunities exist, show only what's available
+
+### Categories Tier
+
+Group findings into these selectable categories:
+- **Missed Opportunities**: Items from `missed_opportunities` array (count of entries)
+- **Dormant Skills**: Skills from `discovery.skills` where `classification == "dormant"` (count)
+- **Unused Skills**: Skills from `discovery.skills` where `classification == "unused"` (count)
+- **Full Report**: Runs the complete analysis workflow (Phases 0-4)
+
+Present as numbered options for user selection. Only show categories that have 1+ items. If a category has 0 items, omit it from the list.
+
+**Note:** These dashboard categories are a simplified view for quick navigation. The Full Report uses the detailed 6-category system from Improvement Categories (Skill Discovery, Agent Delegation, Hook Automation, Configuration, Cleanup, Best Practices).
+
+### Category Drill-Down Data Extraction
+
+When user selects a dashboard category, extract findings from these JSON paths:
+
+| Dashboard Category | JSON Source | Filter |
+|---|---|---|
+| Missed Opportunities | `missed_opportunities` array | All entries (sorted by `impact_score` desc) |
+| Dormant Skills | `discovery.skills` | Where `classification == "dormant"` |
+| Unused Skills | `discovery.skills` | Where `classification == "unused"` |
+
+For each category, iterate through the filtered items and present them using the finding format from the Findings Walk-through section.
+
+### Category Drill-Down Flow
+
+When user selects a category, present findings one-by-one:
+
+```
+User selects [1] Missed Opportunities
+    ↓
+Agent: "Missed Opportunity 1 of {total}"
+       Skill: {skill_name}
+       Evidence: {example_prompts[0]}
+       Impact: {impact_score}
+       Action: {recommended_action}
+
+       [Accept] [Skip] [More Detail]
+    ↓
+User: Accept → record acceptance, move to next
+User: Skip → move to next without recording
+User: More Detail → show full evidence, all matched triggers, all example prompts
+    ↓
+Agent: "Missed Opportunity 2 of {total}..."
+```
+
+Track which items have been reviewed during the session. After all items in a category are reviewed, return to the category selection menu.
+
+## Findings Walk-through
+
+When presenting individual findings during category drill-down, use the Problem-Evidence-Action format below. Each finding must be self-contained and actionable.
+
+### Finding Template
+
+```markdown
+---
+### Finding {X} of {Y}: {finding_type}
+
+**Problem:** {description of what the issue is}
+
+**Evidence:**
+- Confidence: {confidence}% match quality
+- Frequency: Triggered in {session_count} sessions
+- Example prompts:
+  - "{prompt_1}"
+  - "{prompt_2}"
+
+**Recommended Action:** {specific action to take}
+
+{copy-paste code block if applicable}
+
+---
+
+**Options:** [Accept] [Skip] [More Detail]
+```
+
+### Copy-Paste Action Blocks
+
+For each finding type, provide copy-paste ready instructions explaining WHY the recommendation is made:
+
+**CLAUDE.md additions** (for missed opportunities):
+```markdown
+# Copy-paste this to your CLAUDE.md:
+When I mention "{trigger_phrase}", use the {skill_name} skill.
+```
+
+**Skill invocation command** (for dormant skills):
+```markdown
+# Invoke this skill directly:
+/skill_name
+# Or use the Skill tool with: skill_name
+```
+
+**Configuration changes** (for config issues):
+```json
+// Add to .claude/settings.json:
+{"enabledPlugins": {"plugin-name@marketplace": true}}
+```
+
+### Response Handling
+
+When the user responds to a finding:
+
+| Response | Action |
+|----------|--------|
+| **Accept** | Record as actioned in session log, move to next finding |
+| **Skip** | Move to next finding without recording |
+| **More Detail** | Show all matching prompts, session IDs, confidence breakdown, similar skills |
+
+**Accept behavior:** Log the finding as actioned so it can be tracked across sessions. Mark the item as reviewed.
+
+**More Detail behavior:** Show expanded context including:
+- All matching prompts (not just examples)
+- Session IDs where matches occurred
+- Confidence breakdown (length/specificity/position scores)
+- Similar skills that might conflict
+
+### Progress Tracking
+
+Display progress through findings during walk-through:
+
+1. **Header:** Show "Finding {X} of {Y}" at the top of each finding
+2. **Session tracking:** Track which items have been reviewed during the current session
+3. **Completion summary:** After all findings in a category are reviewed, show:
+
+```markdown
+### Category Complete
+
+Reviewed: {reviewed_count} of {total_count} findings
+- Accepted: {accepted_count}
+- Skipped: {skipped_count}
+
+Returning to category selection...
+```
+
+### Finding Type Templates
+
+#### Missed Opportunity Finding
+
+```markdown
+### Finding {X} of {Y}: Missed Opportunity
+
+**Problem:** "{skill_name}" was triggered {count} times but never used.
+
+**Evidence:**
+- Confidence: {confidence}% match quality
+- Frequency: Triggered in {session_count} sessions
+- Example prompts:
+  - "{prompt_1}"
+  - "{prompt_2}"
+
+**Recommended Action:** Add explicit instruction to CLAUDE.md
+
+```markdown
+# Copy-paste this to your CLAUDE.md:
+When I mention "{trigger_phrase}", use the {skill_name} skill.
+```
+
+**Why:** This skill provides {benefit} but isn't being discovered. Adding a CLAUDE.md instruction ensures it triggers when relevant.
+```
+
+#### Dormant Skill Finding
+
+```markdown
+### Finding {X} of {Y}: Dormant Skill
+
+**Problem:** "{skill_name}" has matching triggers but low confidence ({confidence}%).
+
+**Evidence:**
+- Confidence: {confidence}% (below threshold)
+- Trigger matches: {trigger_list}
+- Similar prompts found in {session_count} sessions
+
+**Recommended Action:** Improve trigger phrases in skill definition
+
+```yaml
+# Update skill triggers:
+triggers:
+  - "{existing_trigger}"
+  - "{suggested_trigger_1}"  # Add this
+  - "{suggested_trigger_2}"  # Add this
+```
+
+**Why:** The skill exists but its triggers don't match well enough. Better triggers improve discovery.
+```
+
+#### Configuration Issue Finding
+
+```markdown
+### Finding {X} of {Y}: Configuration Issue
+
+**Problem:** "{component_a}" has conflicting triggers with "{component_b}".
+
+**Evidence:**
+- Overlapping trigger: "{trigger_phrase}"
+- {component_a} confidence: {conf_a}%
+- {component_b} confidence: {conf_b}%
+- Conflict observed in {session_count} sessions
+
+**Recommended Action:** Make triggers more specific to differentiate
+
+```yaml
+# Differentiate triggers:
+# {component_a}: use for "{specific_use_a}"
+# {component_b}: use for "{specific_use_b}"
+```
+
+**Why:** Overlapping triggers cause unpredictable behavior. Claude may pick the wrong component.
+```
+
 ## Analysis Workflow
 
 ### Pre-Phase: Empty State Checks (ALWAYS DO FIRST)
 
 Before any analysis, run through the **Empty State Handling** checks above in order (Check 1 → 2 → 3 → 4). If Check 1 or Check 2 triggers, STOP entirely. If Check 3 triggers, show the healthy message, then continue to Phase 0 (Plugin Efficiency) and Phase 1 (Setup Summary) only — skip Phases 2-4. Check 4 is informational and does not block.
+
+**After empty state checks pass, render the Summary Dashboard (see above) before proceeding to Phase 0.** The dashboard provides the user with an at-a-glance overview. If the user selects a category from the dashboard, jump to the corresponding drill-down. If the user selects "Full Report", continue with Phases 0-4 below.
 
 ### Phase 0: Plugin Efficiency
 
