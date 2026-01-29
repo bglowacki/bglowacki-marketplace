@@ -57,6 +57,6 @@ development_status:
   epic-3: in-progress
   3-1-empty-state-handling: done
   3-2-summary-dashboard: done
-  3-3-findings-walk-through: review
+  3-3-findings-walk-through: done
   3-4-safe-cleanup-mode: ready-for-dev
   epic-3-retrospective: optional

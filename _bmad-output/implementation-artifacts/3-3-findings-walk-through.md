@@ -1,6 +1,6 @@
 # Story 3.3: Findings Walk-through
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -40,30 +40,30 @@ Status: ready-for-dev
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Define finding template (AC: 1)
-  - [ ] Create Problem section format
-  - [ ] Create Evidence section format (with data points)
-  - [ ] Create Action section format (specific instructions)
+- [x] Task 1: Define finding template (AC: 1)
+  - [x] Create Problem section format
+  - [x] Create Evidence section format (with data points)
+  - [x] Create Action section format (specific instructions)
 
-- [ ] Task 2: Implement copy-paste actions (AC: 2)
-  - [ ] For trigger improvements: Show example CLAUDE.md addition
-  - [ ] For skill usage: Show invocation command
-  - [ ] For configuration: Show config file snippet
+- [x] Task 2: Implement copy-paste actions (AC: 2)
+  - [x] For trigger improvements: Show example CLAUDE.md addition
+  - [x] For skill usage: Show invocation command
+  - [x] For configuration: Show config file snippet
 
-- [ ] Task 3: Implement response handling (AC: 3)
-  - [ ] Accept: Log as actioned, move to next
-  - [ ] Skip: Move to next without logging
-  - [ ] More Detail: Show additional context (example prompts, session IDs)
+- [x] Task 3: Implement response handling (AC: 3)
+  - [x] Accept: Log as actioned, move to next
+  - [x] Skip: Move to next without logging
+  - [x] More Detail: Show additional context (example prompts, session IDs)
 
-- [ ] Task 4: Add progress indicator (AC: 4)
-  - [ ] Display "Finding {X} of {Y}" header
-  - [ ] Track reviewed items in session
-  - [ ] Show completion summary at end
+- [x] Task 4: Add progress indicator (AC: 4)
+  - [x] Display "Finding {X} of {Y}" header
+  - [x] Track reviewed items in session
+  - [x] Show completion summary at end
 
-- [ ] Task 5: Create finding type templates (AC: 1, 2)
-  - [ ] Template for Missed Opportunity findings
-  - [ ] Template for Dormant Skill findings
-  - [ ] Template for Configuration Issue findings
+- [x] Task 5: Create finding type templates (AC: 1, 2)
+  - [x] Template for Missed Opportunity findings
+  - [x] Template for Dormant Skill findings
+  - [x] Template for Configuration Issue findings
 
 ## Dev Notes
 
@@ -159,15 +159,29 @@ observability/agents/usage-insights-agent.md
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.5 (claude-opus-4-5-20251101)
 
 ### Debug Log References
 
 ### Completion Notes List
 
+- Added "Findings Walk-through" section to usage-insights-agent.md with Problem-Evidence-Action template format
+- Implemented copy-paste action blocks for CLAUDE.md additions, skill invocation commands, and configuration changes
+- Added response handling table (Accept/Skip/More Detail) with detailed behavior descriptions
+- Added progress tracking with "Finding X of Y" format and completion summary template
+- Created three finding type templates: Missed Opportunity, Dormant Skill, Configuration Issue
+- 22 new tests in test_findings_walkthrough.py, all passing
+- Note: agent file changes were committed together with Story 3-2 (commit 06922dc) since both stories modify the same file
+- Code review: Fixed confidence format (decimal not %), added template ordering test
+
 ### Change Log
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-01-29 | Added Findings Walk-through section with finding templates, copy-paste actions, response handling, progress tracking, and finding type templates | Dev Agent |
+| 2026-01-29 | Code review: fixed confidence format (decimal not %), added template ordering tests, updated completion notes | Claude Opus 4.5 |
 
 ### File List
+
+- observability/agents/usage-insights-agent.md (modified)
+- observability/tests/test_findings_walkthrough.py (new)

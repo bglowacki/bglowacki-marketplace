@@ -410,7 +410,7 @@ When presenting individual findings during category drill-down, use the Problem-
 **Problem:** {description of what the issue is}
 
 **Evidence:**
-- Confidence: {confidence}% match quality
+- Confidence: {confidence} match quality
 - Frequency: Triggered in {session_count} sessions
 - Example prompts:
   - "{prompt_1}"
@@ -494,7 +494,7 @@ Returning to category selection...
 **Problem:** "{skill_name}" was triggered {count} times but never used.
 
 **Evidence:**
-- Confidence: {confidence}% match quality
+- Confidence: {confidence} match quality
 - Frequency: Triggered in {session_count} sessions
 - Example prompts:
   - "{prompt_1}"
@@ -518,7 +518,7 @@ When I mention "{trigger_phrase}", use the {skill_name} skill.
 **Problem:** "{skill_name}" has matching triggers but low confidence ({confidence}%).
 
 **Evidence:**
-- Confidence: {confidence}% (below threshold)
+- Confidence: {confidence} (below threshold)
 - Trigger matches: {trigger_list}
 - Similar prompts found in {session_count} sessions
 
@@ -544,8 +544,8 @@ triggers:
 
 **Evidence:**
 - Overlapping trigger: "{trigger_phrase}"
-- {component_a} confidence: {conf_a}%
-- {component_b} confidence: {conf_b}%
+- {component_a} confidence: {conf_a}
+- {component_b} confidence: {conf_b}
 - Conflict observed in {session_count} sessions
 
 **Recommended Action:** Make triggers more specific to differentiate
