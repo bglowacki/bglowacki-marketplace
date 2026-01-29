@@ -10,7 +10,7 @@ import pytest
 
 # Add the scripts directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "observability-usage-collector" / "scripts"))
-from collect_usage import SkillOrAgent, find_matches, DEFAULT_DAYS
+from collect_usage import SkillOrAgent, find_matches, DEFAULT_DAYS, MIN_TRIGGER_LENGTH, COMMON_WORD_BLOCKLIST
 
 
 @pytest.fixture
@@ -265,3 +265,142 @@ class TestEdgeCases:
         matches = find_matches(prompt, [skill])
         # Even if they don't match (length/boundary issues), shouldn't crash
         assert isinstance(matches, list)
+
+    def test_unicode_triggers(self):
+        """Should handle non-ASCII triggers without crashing (Story 2.1 AC-1)."""
+        skill = SkillOrAgent(
+            name="unicode-skill",
+            type="skill",
+            description="Handles unicode",
+            triggers=["café", "naïve", "résumé", "über"],
+            source_path="/test",
+            source_type="global",
+        )
+        prompt = "Let's discuss the café approach and über design"
+        matches = find_matches(prompt, [skill])
+        assert len(matches) == 1
+        matched = [t.lower() for t in matches[0][1]]
+        assert "café" in matched
+        assert "über" in matched
+
+    def test_very_long_prompt(self, sample_skill):
+        """Should handle very long prompts (2000+ chars) correctly (Story 2.1 AC-1)."""
+        # Place triggers far into the prompt
+        long_prefix = "lorem ipsum " * 200  # ~2400 chars
+        prompt = long_prefix + "debug this error"
+        matches = find_matches(prompt, [sample_skill])
+        assert len(matches) == 1
+        assert len(matches[0][1]) >= 2
+
+
+class TestUppercase3CharRule:
+    """Story 2.1: 3-char uppercase trigger rule (ADR-001)."""
+
+    def test_uppercase_3char_matches(self):
+        """3-char UPPERCASE triggers like TDD, API should match."""
+        skill = SkillOrAgent(
+            name="tdd-skill",
+            type="skill",
+            description="TDD workflow",
+            triggers=["TDD", "API", "test driven"],
+            source_path="/test",
+            source_type="global",
+        )
+        prompt = "Use TDD and API for this"
+        matches = find_matches(prompt, [skill])
+        assert len(matches) == 1
+        matched = [t for t in matches[0][1]]
+        assert "TDD" in matched
+        assert "API" in matched
+
+    def test_lowercase_3char_skipped(self):
+        """3-char lowercase triggers like 'tdd' should be skipped."""
+        skill = SkillOrAgent(
+            name="some-skill",
+            type="skill",
+            description="Some skill",
+            triggers=["tdd", "api", "longer trigger"],
+            source_path="/test",
+            source_type="global",
+        )
+        prompt = "Use tdd and api for this longer trigger"
+        matches = find_matches(prompt, [skill])
+        # "tdd" and "api" skipped (lowercase 3-char), only "longer trigger" matches
+        # 1 trigger < min_triggers=2, so no match
+        assert len(matches) == 0
+
+    def test_mixed_case_3char_skipped(self):
+        """3-char mixed case like 'Tdd' should be skipped (not fully uppercase)."""
+        skill = SkillOrAgent(
+            name="mixed-skill",
+            type="skill",
+            description="Mixed",
+            triggers=["Tdd", "Api", "long enough"],
+            source_path="/test",
+            source_type="global",
+        )
+        prompt = "Tdd and Api and long enough"
+        matches = find_matches(prompt, [skill])
+        # Only "long enough" passes (1 trigger < 2)
+        assert len(matches) == 0
+
+
+class TestCommonWordBlocklist:
+    """Story 2.1: Common word blocklist (ADR-001)."""
+
+    def test_3char_blocklisted_words_skipped(self):
+        """3-char words in blocklist should be skipped even if uppercase."""
+        skill = SkillOrAgent(
+            name="blocklist-test",
+            type="skill",
+            description="Test blocklist",
+            triggers=["THE", "FOR", "AND", "longer phrase"],
+            source_path="/test",
+            source_type="global",
+        )
+        prompt = "THE FOR AND longer phrase here"
+        matches = find_matches(prompt, [skill])
+        # THE, FOR, AND are in blocklist — only "longer phrase" matches (1 < 2)
+        assert len(matches) == 0
+
+    def test_4char_blocklisted_words_skipped(self):
+        """4-char common words in blocklist should also be skipped."""
+        # Check which 4-char words are in the blocklist
+        four_char_blocked = [w for w in COMMON_WORD_BLOCKLIST if len(w) == 4]
+        if not four_char_blocked:
+            pytest.skip("No 4-char words in blocklist")
+
+        word = four_char_blocked[0]
+        skill = SkillOrAgent(
+            name="four-char-test",
+            type="skill",
+            description="Test",
+            triggers=[word, "another trigger"],
+            source_path="/test",
+            source_type="global",
+        )
+        prompt = f"{word} and another trigger"
+        matches = find_matches(prompt, [skill])
+        # blocked word skipped, only "another trigger" (1 < 2)
+        assert len(matches) == 0
+
+    def test_non_blocklisted_3char_uppercase_matches(self):
+        """3-char uppercase words NOT in blocklist should match."""
+        skill = SkillOrAgent(
+            name="valid-3char",
+            type="skill",
+            description="Test",
+            triggers=["TDD", "DDD", "some phrase"],
+            source_path="/test",
+            source_type="global",
+        )
+        prompt = "Use TDD and DDD patterns"
+        matches = find_matches(prompt, [skill])
+        assert len(matches) == 1
+        matched = matches[0][1]
+        assert "TDD" in matched
+        assert "DDD" in matched
+
+    def test_min_trigger_length_constant(self):
+        """MIN_TRIGGER_LENGTH should be 3 per ADR-001."""
+        assert MIN_TRIGGER_LENGTH == 3

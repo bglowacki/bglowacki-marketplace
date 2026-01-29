@@ -9,4 +9,7 @@ dependencies = ["pyyaml"]
 dev = ["pytest"]
 
 [tool.uv]
-dev-dependencies = ["pytest"]
+dev-dependencies = [
+    "pytest",
+    "pytest-cov>=7.0.0",
+]
