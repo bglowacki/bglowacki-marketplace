@@ -1850,6 +1850,105 @@ def find_matches(prompt: str, items: list[SkillOrAgent], min_triggers: int = 2, 
     return matches
 
 
+# Story 2.3: Impact scoring functions
+
+def calculate_frequency_score(occurrence_count: int) -> float:
+    """Normalize occurrence count to 0.0-1.0 scale. 20+ = 1.0."""
+    return min(1.0, occurrence_count / 20)
+
+
+def calculate_recency_score(days_since_last: int, analysis_period: int) -> float:
+    """More recent = higher score. Clamps to 0.0 minimum."""
+    return max(0.0, 1.0 - (days_since_last / analysis_period))
+
+
+def calculate_impact_score(confidence: float, frequency: float, recency: float) -> float:
+    """Weighted impact: confidence*0.4 + frequency*0.4 + recency*0.2."""
+    return (confidence * 0.4) + (frequency * 0.4) + (recency * 0.2)
+
+
+def detect_missed_opportunities(
+    sessions: list[SessionData],
+    skills: list[SkillOrAgent],
+    analysis_period_days: int = DEFAULT_DAYS,
+) -> list[dict]:
+    """Story 2.3: Detect skills matched but not invoked, grouped by skill with impact scores.
+
+    Returns list of dicts sorted by impact_score descending, each containing:
+    skill_name, confidence, impact_score, occurrence_count, example_prompts, sessions_affected
+    """
+    # Per-skill aggregation
+    grouped: dict[str, dict] = {}
+
+    now = datetime.now()
+
+    for session in sessions:
+        for skill in skills:
+            matches = find_matches(session.prompts[0] if session.prompts else "", [skill])
+            # Check all prompts in session
+            session_matched = False
+            best_confidence = 0.0
+            matched_prompt = ""
+            for prompt in session.prompts:
+                prompt_matches = find_matches(prompt, [skill])
+                if prompt_matches:
+                    session_matched = True
+                    for m in prompt_matches:
+                        if m.confidence > best_confidence:
+                            best_confidence = m.confidence
+                            matched_prompt = prompt
+
+            was_invoked = skill.name in session.skills_used
+
+            if session_matched and not was_invoked and best_confidence > CONFIDENCE_HIGH:
+                if skill.name not in grouped:
+                    grouped[skill.name] = {
+                        "skill_name": skill.name,
+                        "occurrence_count": 0,
+                        "example_prompts": [],
+                        "sessions_affected": [],
+                        "confidences": [],
+                        "latest_date": None,
+                    }
+
+                entry = grouped[skill.name]
+                entry["occurrence_count"] += 1
+                entry["sessions_affected"].append(session.session_id)
+                entry["confidences"].append(best_confidence)
+
+                if len(entry["example_prompts"]) < 3:
+                    entry["example_prompts"].append(matched_prompt[:MAX_PROMPT_LENGTH])
+
+                if session.session_date:
+                    if entry["latest_date"] is None or session.session_date > entry["latest_date"]:
+                        entry["latest_date"] = session.session_date
+
+    # Compute scores and build output
+    result = []
+    for skill_name, data in grouped.items():
+        avg_confidence = sum(data["confidences"]) / len(data["confidences"])
+        freq_score = calculate_frequency_score(data["occurrence_count"])
+
+        days_since = 0
+        if data["latest_date"]:
+            days_since = (now - data["latest_date"]).days
+
+        recency = calculate_recency_score(days_since, analysis_period_days)
+        impact = calculate_impact_score(avg_confidence, freq_score, recency)
+
+        result.append({
+            "skill_name": skill_name,
+            "confidence": round(avg_confidence, 2),
+            "impact_score": round(impact, 4),
+            "occurrence_count": data["occurrence_count"],
+            "example_prompts": data["example_prompts"],
+            "sessions_affected": data["sessions_affected"],
+        })
+
+    result.sort(key=lambda x: -x["impact_score"])
+    return result
+
+
 def _classify_component(item: SkillOrAgent, sessions: list[SessionData], used_field: str) -> str:
     """Story 1.2 AC-1: Classify a skill or agent based on usage in sessions.
 
@@ -2065,6 +2164,9 @@ def generate_analysis_json(
     # ADR-054: Pre-compute deterministic findings
     pre_computed = compute_pre_computed_findings(skills, agents, commands, sessions, missed, setup_profile)
 
+    # Story 2.3: Detect missed opportunities grouped by skill with impact scores
+    missed_opportunities = detect_missed_opportunities(sessions, skills + agents)
+
     # Story 1.2 AC-2 & AC-4: Build skill/agent discovery with usage stats and timestamps
     def build_skill_discovery(s: SkillOrAgent) -> dict:
         usage_count, sessions_used, first_used, last_used = get_skill_usage_stats(s, sessions)
@@ -2097,7 +2199,7 @@ def generate_analysis_json(
     return {
         "_schema": {
             "description": "Claude Code usage analysis data for agent interpretation",
-            "version": "3.11",  # Story 1.2: Added classification, usage counts, timestamps, per_project
+            "version": "3.12",  # Story 2.3: Added missed_opportunities with impact scoring
             "collection_timestamp": datetime.now().isoformat(),  # Story 1.2 AC-5
             "sections": {
                 "discovery": "All available skills, agents, commands, and hooks discovered from global, project, and plugin sources",
@@ -2107,6 +2209,7 @@ def generate_analysis_json(
                 "data_sufficiency": "ADR-050: Statistical sufficiency assessment for pattern detection",
                 "quality_metrics": "ADR-053: Analysis quality metrics for self-evaluation",
                 "pre_computed_findings": "ADR-054: Deterministic findings (100% certain, no LLM needed)",
+                "missed_opportunities": "Story 2.3: Missed opportunities grouped by skill with impact scores",
                 "potential_matches_detailed": "ADR-046: Detailed potential matches with confidence scores and evidence",
                 "feedback": "ADR-048: User feedback on previous recommendations (accepted/dismissed)",
                 "claude_md": "Content and structure of CLAUDE.md configuration files",
@@ -2218,6 +2321,9 @@ def generate_analysis_json(
         # ADR-054: Pre-computed deterministic findings
         "pre_computed_findings": pre_computed,
 
+        # Story 2.3: Missed opportunities grouped by skill with impact scores
+        "missed_opportunities": missed_opportunities,
+
         # ADR-046 + ADR-047 + ADR-049: Detailed potential matches with limits
         "potential_matches_detailed": {
             "summary": {
@@ -2257,6 +2363,12 @@ def generate_analysis_json(
                     "recency_weight": round(m.recency_weight, 2),
                     "age_days": (datetime.now() - m.session_date).days if m.session_date else None,
                     "priority_score": round(m.confidence * m.recency_weight, 2),  # Combined score
+                    # Story 2.3: Impact score
+                    "impact_score": round(calculate_impact_score(
+                        m.confidence,
+                        calculate_frequency_score(sum(1 for x in missed if x.matched_item.name == m.matched_item.name)),
+                        m.recency_weight,
+                    ), 4),
                     # ADR-048: Finding hash for feedback tracking
                     "finding_hash": m.finding_hash,
                 }
