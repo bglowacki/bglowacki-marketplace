@@ -228,7 +228,7 @@ class TestSemanticDetection:
         assert exact[0]["classification"] == "COLLISION"
         assert exact[0]["similarity"] is None
         assert exact[0]["intentional"] is False
-        assert exact[0]["hint"] is None
+        assert exact[0]["hint"] is not None  # Story 4.3: hints now populated
 
     def test_empty_token_set_skipped(self):
         """AC-1: Empty token sets after processing don't cause comparison."""

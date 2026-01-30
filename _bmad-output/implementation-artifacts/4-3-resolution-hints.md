@@ -1,6 +1,6 @@
 # Story 4.3: Resolution Hints
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -39,32 +39,32 @@ so that I immediately know what to do about it without needing the walk-through.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Write tests first (TDD) (AC: 1-3)
-  - [ ] `test_hint_collision_skill_skill` — correct hint text for skill+skill HIGH
-  - [ ] `test_hint_collision_command_skill` — correct hint for command+skill HIGH
-  - [ ] `test_hint_collision_command_command` — correct hint for command+command HIGH
-  - [ ] `test_hint_collision_agent_other` — correct hint for agent+other HIGH
-  - [ ] `test_hint_semantic_medium` — correct hint with similarity percentage for MEDIUM
-  - [ ] `test_hint_semantic_low` — correct hint with similarity percentage for LOW
-  - [ ] `test_hint_pattern_info` — correct hint for PATTERN INFO
-  - [ ] `test_hint_interpolates_real_names` — actual component names in hint, not placeholders
-  - [ ] `test_hint_similarity_format` — similarity displayed as percentage (e.g., "67%")
+- [x] Task 1: Write tests first (TDD) (AC: 1-3)
+  - [x] `test_hint_collision_skill_skill` — correct hint text for skill+skill HIGH
+  - [x] `test_hint_collision_command_skill` — correct hint for command+skill HIGH
+  - [x] `test_hint_collision_command_command` — correct hint for command+command HIGH
+  - [x] `test_hint_collision_agent_other` — correct hint for agent+other HIGH
+  - [x] `test_hint_semantic_medium` — correct hint with similarity percentage for MEDIUM
+  - [x] `test_hint_semantic_low` — correct hint with similarity percentage for LOW
+  - [x] `test_hint_pattern_info` — correct hint for PATTERN INFO
+  - [x] `test_hint_interpolates_real_names` — actual component names in hint, not placeholders
+  - [x] `test_hint_similarity_format` — similarity displayed as percentage (e.g., "67%")
 
-- [ ] Task 2: Implement `_generate_overlap_hint()` helper function (AC: 1, 3)
-  - [ ] Place near overlap detection code in `collect_usage.py`
-  - [ ] Accept overlap dict (with classification, severity, items/components, similarity)
-  - [ ] Determine component types from items list (e.g., "skill:foo" → type="skill", name="foo")
-  - [ ] Select hint template based on (classification, severity, component types)
-  - [ ] Interpolate actual names, types, sources, similarity scores
-  - [ ] Return hint string
+- [x] Task 2: Implement `_generate_overlap_hint()` helper function (AC: 1, 3)
+  - [x] Place near overlap detection code in `collect_usage.py`
+  - [x] Accept overlap dict (with classification, severity, items/components, similarity)
+  - [x] Determine component types from items list (e.g., "skill:foo" → type="skill", name="foo")
+  - [x] Select hint template based on (classification, severity, component types)
+  - [x] Interpolate actual names, types, sources, similarity scores
+  - [x] Return hint string
 
-- [ ] Task 3: Wire hint generation into overlap detection (AC: 1, 4)
-  - [ ] Call `_generate_overlap_hint()` for each overlap dict in `compute_setup_profile()`
-  - [ ] Set `hint` field on all overlap dicts (exact-match, semantic, PATTERN)
-  - [ ] Replace `hint: None` defaults from Story 4.1 with actual hints
+- [x] Task 3: Wire hint generation into overlap detection (AC: 1, 4)
+  - [x] Call `_generate_overlap_hint()` for each overlap dict in `compute_setup_profile()`
+  - [x] Set `hint` field on all overlap dicts (exact-match, semantic, PATTERN)
+  - [x] Replace `hint: None` defaults from Story 4.1 with actual hints
 
-- [ ] Task 4: Verify all existing tests pass
-  - [ ] Run `cd observability && uv run pytest tests/ -x`
+- [x] Task 4: Verify all existing tests pass
+  - [x] Run `cd observability && uv run pytest tests/ -x`
 
 ## Dev Notes
 
@@ -105,9 +105,29 @@ Per ADR-042 — no separate files. Place `_generate_overlap_hint()` near the ove
 ## Dev Agent Record
 
 ### Agent Model Used
+Claude Opus 4.5
 
 ### Debug Log References
 
 ### Completion Notes List
+- Implemented `_parse_component()` and `_generate_overlap_hint()` helpers in collect_usage.py (placed before `compute_setup_profile()`)
+- All 7 hint templates from ADR-077 Part 3 implemented: COLLISION (skill+skill, command+skill, command+command, agent+other), SEMANTIC (MEDIUM, LOW), PATTERN (INFO)
+- Wired hint generation into all three overlap creation points: exact-match triggers, name collisions, and semantic overlaps
+- Updated existing test `test_existing_overlaps_get_migration_defaults` to expect non-None hints (Story 4.3 replaces `hint: None` defaults)
+- All 405 tests pass (0 failures, 2 skipped)
+
+### Code Review Fixes (2026-01-30)
+- Fixed PATTERN hint to include `{source}` per ADR-077 spec; added `source` field to PATTERN overlap entries
+- Added early return guard for `items` lists with fewer than 2 elements (prevents IndexError)
+- Clarified tuple unpacking — removed ambiguous ternary on unpacking lines
+- Improved `next()` call readability for agent collision branch (named tuple destructure)
+- Added 3 new tests: source in PATTERN hint, empty items, single item edge case
+- All 408 tests pass (0 failures, 2 skipped)
 
 ### File List
+- observability/skills/observability-usage-collector/scripts/collect_usage.py (modified — added `_parse_component`, `_generate_overlap_hint`, wired hints into overlap detection)
+- observability/tests/test_resolution_hints.py (new — 9 TDD test cases for hint generation)
+- observability/tests/test_semantic_detection.py (modified — updated migration defaults test for non-None hints)
+
+## Change Log
+- 2026-01-30: Implemented Story 4.3 — resolution hints for all overlap types with TDD tests

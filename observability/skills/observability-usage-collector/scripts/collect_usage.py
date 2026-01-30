@@ -760,6 +760,63 @@ class SetupProfile:
     description_quality: list[dict] = field(default_factory=list)  # ADR-007
 
 
+def _parse_component(item: str) -> tuple[str, str]:
+    """Parse 'type:name' into (type, name)."""
+    parts = item.split(":", 1)
+    return (parts[0], parts[1]) if len(parts) == 2 else ("unknown", item)
+
+
+def _generate_overlap_hint(overlap: dict) -> str:
+    classification = overlap.get("classification", "")
+    severity = overlap.get("severity", "")
+    items = overlap.get("items", [])
+    similarity = overlap.get("similarity")
+
+    if len(items) < 2:
+        return ""
+
+    parsed = [_parse_component(item) for item in items]
+    types = {t for t, _ in parsed}
+
+    if classification == "PATTERN":
+        cmd = next((n for t, n in parsed if t == "command"), parsed[0][1])
+        skill_name = next((n for t, n in parsed if t == "skill"), parsed[1][1])
+        source = overlap.get("source", "")
+        source_part = f" ({source})" if source else ""
+        return f"Assumed delegation: `{cmd}` → `{skill_name}`{source_part} (v1 heuristic) — no action needed"
+
+    if classification == "COLLISION":
+        a, b = items[0], items[1]
+        type_a, name_a = _parse_component(a)
+        type_b, name_b = _parse_component(b)
+        trigger = overlap.get("trigger", "")
+        name = trigger.replace("[name collision: ", "").rstrip("]") if trigger.startswith("[name collision:") else trigger
+
+        if "agent" in types:
+            agent_name = next((n for t, n in parsed if t == "agent"), "?")
+            other_type, other_name = next(((t, n) for t, n in parsed if t != "agent"), ("?", "?"))
+            return f"Agent `{agent_name}` collides with {other_type} `{other_name}` on name `{name}` — rename the non-agent component to avoid routing ambiguity"
+
+        if type_a == "command" and type_b == "skill":
+            return f"`{a}` (command) and `{b}` (skill) share name `{name}` — if same-source, this is likely an intentional delegation pattern (will be auto-classified as PATTERN/INFO); if cross-source, rename the command or configure as intentional in v2's `intentional_overlaps`"
+        if type_a == "skill" and type_b == "command":
+            return f"`{b}` (command) and `{a}` (skill) share name `{name}` — if same-source, this is likely an intentional delegation pattern (will be auto-classified as PATTERN/INFO); if cross-source, rename the command or configure as intentional in v2's `intentional_overlaps`"
+
+        if type_a == "command" and type_b == "command":
+            return f"`{a}` and `{b}` are both commands named `{name}` — only one can be invoked; remove or rename the duplicate from the lower-priority plugin"
+
+        return f"`{a}` and `{b}` are both skills named `{name}` — rename the less specific one or merge into a single skill"
+
+    if classification == "SEMANTIC":
+        a, b = items[0], items[1]
+        sim_pct = f"{similarity:.0%}" if similarity is not None else "?"
+        if severity == "MEDIUM":
+            return f"Triggers `{a}` and `{b}` overlap ({sim_pct}) — add distinct trigger prefixes, or consolidate into one component if they serve the same purpose"
+        return f"Minor trigger similarity ({sim_pct}) between `{a}` and `{b}` — no action needed unless users report misfires"
+
+    return ""
+
+
 def compute_setup_profile(
     skills: list[SkillOrAgent],
     agents: list[SkillOrAgent],
@@ -861,7 +918,7 @@ def compute_setup_profile(
                 severity = "LOW"
 
             item_labels = [f"{t}:{n}" for t, n, s in items]
-            overlapping.append({
+            overlap_entry = {
                 "trigger": trigger,
                 "items": item_labels,
                 "severity": severity,
@@ -870,7 +927,9 @@ def compute_setup_profile(
                 "similarity": None,
                 "intentional": False,
                 "hint": None,
-            })
+            }
+            overlap_entry["hint"] = _generate_overlap_hint(overlap_entry)
+            overlapping.append(overlap_entry)
             # Track all component pairs from this exact match (AC-3)
             for i in range(len(item_labels)):
                 for j in range(i + 1, len(item_labels)):
@@ -895,8 +954,10 @@ def compute_setup_profile(
             "detection_method": "exact",
             "similarity": None,
             "intentional": is_same_source,
-            "hint": f"Command `{name}` delegates to skill `{name}` ({skill_src}) — assumed delegation pattern (v1 heuristic)" if is_same_source else None,
+            "hint": None,
+            "source": skill_src if is_same_source else "",
         }
+        entry["hint"] = _generate_overlap_hint(entry)
         name_collision_entries.append(entry)
         if not is_same_source:
             high_severity_count += 1
@@ -929,7 +990,7 @@ def compute_setup_profile(
                 score = _jaccard_similarity(stems_a, stems_b)
                 if score >= SEMANTIC_THRESHOLD:
                     severity = "MEDIUM" if score >= 0.8 else "LOW"
-                    overlapping.append({
+                    sem_entry = {
                         "trigger": f"{trig_a} ↔ {trig_b}",
                         "items": [comp_a, comp_b],
                         "severity": severity,
@@ -938,7 +999,9 @@ def compute_setup_profile(
                         "similarity": round(score, 4),
                         "intentional": False,
                         "hint": None,
-                    })
+                    }
+                    sem_entry["hint"] = _generate_overlap_hint(sem_entry)
+                    overlapping.append(sem_entry)
                     # Avoid duplicate semantic pairs
                     exact_pairs.add(pair_key)
 
