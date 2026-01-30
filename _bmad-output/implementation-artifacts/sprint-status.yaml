@@ -44,14 +44,14 @@ development_status:
   epic-1: done
   1-1-session-data-collection: done
   1-2-usage-analysis-output: done
-  epic-1-retrospective: optional
+  epic-1-retrospective: done
 
   # Epic 2: Missed Opportunity Detection
   epic-2: done
   2-1-test-suite-for-find-matches: done
   2-2-confidence-scoring: done
   2-3-missed-opportunity-detection-with-impact: done
-  epic-2-retrospective: optional
+  epic-2-retrospective: done
 
   # Epic 3: Actionable Output
   epic-3: done
@@ -59,4 +59,4 @@ development_status:
   3-2-summary-dashboard: done
   3-3-findings-walk-through: done
   3-4-safe-cleanup-mode: done
-  epic-3-retrospective: optional
+  epic-3-retrospective: done

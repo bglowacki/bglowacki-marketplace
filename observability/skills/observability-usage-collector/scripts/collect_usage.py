@@ -214,9 +214,6 @@ class SessionData:
     # ADR-047: Temporal tracking
     session_date: Optional[datetime] = None
     recency_weight: float = 1.0  # 0.0-1.0 based on age
-    # Workflow tracking
-    stages_visited: list[str] = field(default_factory=list)
-    session_type: str = "UNKNOWN"  # DEV or READ
     # Story 1.2 AC-3: Per-project tracking
     project_path: str = "unknown"
 
@@ -471,77 +468,6 @@ def assess_data_sufficiency(sessions: list, missed: list) -> dict:
         "significant_patterns": len(significant_components),
         "insufficient_patterns": len(component_counts) - len(significant_components),
     }
-
-
-def classify_session_type(tools_used: set, stages_visited: list) -> str:
-    """Classify session as DEV (code changes) or READ (exploration only)."""
-    write_tools = {"Edit", "Write", "NotebookEdit"}
-    if any(tool in tools_used for tool in write_tools):
-        return "DEV"
-    dev_stages = {"implement", "test", "commit", "deploy", "review"}
-    if any(s in dev_stages for s in stages_visited):
-        return "DEV"
-    return "READ"
-
-
-def compute_workflow_gaps(sessions: list[SessionData]) -> list[dict]:
-    """Detect sessions with incomplete workflows (implement without test/commit)."""
-    gaps = []
-    for s in sessions:
-        stages = set(s.stages_visited) if s.stages_visited else set()
-        if "implement" in stages and "test" not in stages and "commit" not in stages:
-            gaps.append({
-                "session_id": s.session_id,
-                "stages_visited": list(stages),
-                "missing": ["test", "commit"],
-                "issue": "Implemented but didn't test or commit"
-            })
-    return gaps[:10]
-
-
-def detect_cross_references(
-    skills: list[SkillOrAgent],
-    agents: list[SkillOrAgent],
-    usage_stats: dict
-) -> list[dict]:
-    """Detect skills/agents that reference each other in their content."""
-    all_items = skills + agents
-    name_set = {item.name.lower() for item in all_items}
-    references = []
-
-    for item in all_items:
-        if hasattr(item, 'source_path') and Path(item.source_path).exists():
-            try:
-                content = Path(item.source_path).read_text().lower()
-                refs_found = [name for name in name_set
-                             if name != item.name.lower() and name in content]
-                if refs_found:
-                    references.append({
-                        "source": item.name,
-                        "references": refs_found,
-                        "source_usage": usage_stats.get(item.name, 0),
-                        "referenced_usage": {r: usage_stats.get(r, 0) for r in refs_found}
-                    })
-            except (OSError, IOError):
-                continue
-    return references[:20]
-
-
-def compute_potential_redundancies(cross_refs: list, usage: dict) -> list[dict]:
-    """Flag items that reference others but have lower usage."""
-    redundancies = []
-    for ref in cross_refs:
-        src = ref["source"]
-        src_usage = ref["source_usage"]
-        for target, target_usage in ref["referenced_usage"].items():
-            if src_usage < target_usage and target_usage > 0:
-                redundancies.append({
-                    "items": [src, target],
-                    "overlap_reason": f"{src} references {target} in content",
-                    "usage": {src: src_usage, target: target_usage},
-                    "recommendation": f"Consider if {src} adds value over {target}"
-                })
-    return redundancies[:10]
 
 
 def hash_finding(category: str, component: str, trigger: str) -> str:

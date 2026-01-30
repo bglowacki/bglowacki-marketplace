@@ -1,6 +1,6 @@
 # Story 2.1: Test Suite for find_matches()
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -197,15 +197,27 @@ COMMON_WORD_BLOCKLIST = ["the", "add", "run", "fix", "help", "make", "get", "set
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.5 (claude-opus-4-5-20251101)
 
 ### Debug Log References
 
+N/A - work absorbed into Story 2.2
+
 ### Completion Notes List
+
+- Story 2.1 work was absorbed into Story 2.2 (Confidence Scoring) during implementation
+- Test suite for `find_matches()` was created as part of Story 2.2, which modified `test_find_matches.py` with backward-compatible tests and created `test_confidence_scoring.py` with 26 comprehensive tests
+- All 11 required test cases from ADR-035 are covered across the test files
+- Schema version update (v3.0 → v3.1) was handled as part of Story 2.2's schema evolution
 
 ### Change Log
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-01-29 | Work absorbed into Story 2.2; tests created there | Claude Opus 4.5 |
+| 2026-01-29 | Retrospective cleanup: updated status and dev record | Claude Opus 4.5 |
 
 ### File List
+
+- observability/tests/test_find_matches.py (modified as part of Story 2.2)
+- observability/tests/test_confidence_scoring.py (new, created as part of Story 2.2)
