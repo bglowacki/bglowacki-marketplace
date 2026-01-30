@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["pyyaml"]
+# dependencies = ["pyyaml", "nltk"]
 # ///
 """
 Usage Collector - Collect Claude Code usage data for analysis.
@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import re
+import string
 import sys
 import hashlib
 from collections import defaultdict
@@ -36,6 +37,9 @@ DEFAULT_SESSIONS = 10
 DEFAULT_DAYS = 7  # PRD specification: 7-day default analysis period
 MIN_TRIGGER_LENGTH = 3  # ADR-001: Unified trigger length threshold
 MIN_PARSE_SUCCESS_RATE = 0.80  # ADR-026: Fail if <80% entries parse
+SEMANTIC_DETECTION_ENABLED: bool = True  # ADR-077: Toggle semantic overlap detection
+SEMANTIC_THRESHOLD: float = 0.4  # ADR-077: Jaccard similarity threshold
+_PUNCT_TABLE = str.maketrans("", "", string.punctuation)  # ADR-077: Reusable punctuation strip table
 
 # Common word blocklist for trigger matching (ADR-001)
 COMMON_WORD_BLOCKLIST = frozenset({
@@ -59,6 +63,37 @@ FREQ_SOMETIMES_MAX = 10
 
 # Track YAML parsing issues for summary reporting (graceful handling)
 _yaml_parse_issues: list[str] = []
+
+# Lazy-initialized Porter Stemmer (ADR-077)
+_stemmer = None
+
+
+def _get_stemmer():
+    global _stemmer
+    if _stemmer is None:
+        from nltk.stem.porter import PorterStemmer
+        _stemmer = PorterStemmer()
+    return _stemmer
+
+
+def tokenize_and_stem(trigger: str) -> frozenset[str]:
+    if not trigger or not trigger.strip():
+        return frozenset()
+    # Split on spaces, hyphens, underscores
+    tokens = re.split(r"[\s\-_]+", trigger.lower())
+    # Strip punctuation from each token
+    tokens = [t.translate(_PUNCT_TABLE) for t in tokens]
+    # Remove empty, single-char, and blocklisted tokens before stemming
+    tokens = [t for t in tokens if len(t) > 1 and t not in COMMON_WORD_BLOCKLIST]
+    stemmer = _get_stemmer()
+    stemmed = {stemmer.stem(t) for t in tokens}
+    return frozenset(stemmed)
+
+
+def _jaccard_similarity(set_a: frozenset, set_b: frozenset) -> float:
+    if not set_a or not set_b:
+        return 0.0
+    return len(set_a & set_b) / len(set_a | set_b)
 
 
 # Story 1.2: Skill classification constants
@@ -789,7 +824,7 @@ def compute_setup_profile(
         red_flags.append(f"{empty_desc_count} components with empty descriptions")
 
     # ADR-008: Enhanced overlapping trigger detection with severity scoring
-    # Include commands in overlap detection
+    # Include commands in overlap detection (extended with semantic detection per ADR-077)
     all_components = skills + agents + commands
     trigger_map: dict[str, list[tuple[str, str, str]]] = defaultdict(list)  # trigger -> [(type, name, source)]
 
@@ -806,6 +841,7 @@ def compute_setup_profile(
 
     overlapping = []
     high_severity_count = 0
+    exact_pairs: set[frozenset[str]] = set()  # ADR-077: Track exact-match pairs for precedence
 
     for trigger, items in trigger_map.items():
         if len(items) > 1:
@@ -824,20 +860,87 @@ def compute_setup_profile(
             else:
                 severity = "LOW"
 
+            item_labels = [f"{t}:{n}" for t, n, s in items]
             overlapping.append({
                 "trigger": trigger,
-                "items": [f"{t}:{n}" for t, n, s in items],
+                "items": item_labels,
                 "severity": severity,
+                "classification": "COLLISION",
+                "detection_method": "exact",
+                "similarity": None,
+                "intentional": False,
+                "hint": None,
             })
+            # Track all component pairs from this exact match (AC-3)
+            for i in range(len(item_labels)):
+                for j in range(i + 1, len(item_labels)):
+                    exact_pairs.add(frozenset({item_labels[i], item_labels[j]}))
 
-    # Add name collision warnings (highest severity)
+    # Add name collision warnings (highest severity) with PATTERN classification (ADR-077 Part 2)
+    # Build source lookup for skills and commands
+    _skill_source = {s.name.lower(): s.source_type for s in skills}
+    _command_source = {c.name.lower(): c.source_type for c in commands}
+
+    name_collision_entries = []
     for name in name_collisions:
-        overlapping.insert(0, {
+        skill_src = _skill_source.get(name, "")
+        cmd_src = _command_source.get(name, "")
+        is_same_source = skill_src == cmd_src and skill_src != ""
+
+        entry = {
             "trigger": f"[name collision: {name}]",
             "items": [f"skill:{name}", f"command:{name}"],
-            "severity": "HIGH",
-        })
-        high_severity_count += 1
+            "severity": "INFO" if is_same_source else "HIGH",
+            "classification": "PATTERN" if is_same_source else "COLLISION",
+            "detection_method": "exact",
+            "similarity": None,
+            "intentional": is_same_source,
+            "hint": f"Command `{name}` delegates to skill `{name}` ({skill_src}) — assumed delegation pattern (v1 heuristic)" if is_same_source else None,
+        }
+        name_collision_entries.append(entry)
+        if not is_same_source:
+            high_severity_count += 1
+        exact_pairs.add(frozenset({f"skill:{name}", f"command:{name}"}))
+    overlapping = name_collision_entries + overlapping
+
+    # ADR-077: Semantic overlap detection via stemmed token-set Jaccard similarity
+    if SEMANTIC_DETECTION_ENABLED:
+        # Build stemmed token sets for all components
+        component_stems: list[tuple[str, str, frozenset[str]]] = []  # (type:name, original_trigger, stemmed)
+        for item in all_components:
+            for trigger in item.triggers:
+                trigger_lower = trigger.lower()
+                if len(trigger_lower) >= MIN_TRIGGER_LENGTH:
+                    stems = tokenize_and_stem(trigger_lower)
+                    if stems:  # AC-1: skip empty token sets
+                        component_stems.append((f"{item.type}:{item.name}", trigger_lower, stems))
+
+        # Compare all pairs
+        for i in range(len(component_stems)):
+            for j in range(i + 1, len(component_stems)):
+                comp_a, trig_a, stems_a = component_stems[i]
+                comp_b, trig_b, stems_b = component_stems[j]
+                if comp_a == comp_b:
+                    continue
+                # AC-3: skip pairs already flagged by exact-match
+                pair_key = frozenset({comp_a, comp_b})
+                if pair_key in exact_pairs:
+                    continue
+                score = _jaccard_similarity(stems_a, stems_b)
+                if score >= SEMANTIC_THRESHOLD:
+                    severity = "MEDIUM" if score >= 0.8 else "LOW"
+                    overlapping.append({
+                        "trigger": f"{trig_a} ↔ {trig_b}",
+                        "items": [comp_a, comp_b],
+                        "severity": severity,
+                        "classification": "SEMANTIC",
+                        "detection_method": "stemmed",
+                        "similarity": round(score, 4),
+                        "intentional": False,
+                        "hint": None,
+                    })
+                    # Avoid duplicate semantic pairs
+                    exact_pairs.add(pair_key)
 
     if high_severity_count > 0:
         red_flags.append(f"{high_severity_count} HIGH severity trigger/name collisions (skill/command overlap)")

@@ -4,6 +4,7 @@ workflowComplete: true
 inputDocuments:
   - _bmad-output/planning-artifacts/prd.md
   - _bmad-output/planning-artifacts/architecture.md
+  - docs/adrs/ADR-077-semantic-overlap-detection-classification-resolution.md
 ---
 
 # bglowacki-marketplace - Epic Breakdown
@@ -168,6 +169,27 @@ The following items MUST be included in story acceptance criteria:
 | FR-3.3.1 | Epic 3 | Deletion safety constraints |
 | FR-3.3.2 | Epic 3 | Opt-in cleanup mode |
 | FR-3.3.3 | Epic 3 | Rollback guidance |
+| FR-4.1.1 | Epic 4 | Tokenize triggers |
+| FR-4.1.2 | Epic 4 | Stem tokens via Porter Stemmer |
+| FR-4.1.3 | Epic 4 | Remove blocklisted words |
+| FR-4.1.4 | Epic 4 | Empty token set guard |
+| FR-4.1.5 | Epic 4 | Jaccard similarity comparison |
+| FR-4.1.6 | Epic 4 | SEMANTIC classification at ≥0.4 |
+| FR-4.1.7 | Epic 4 | Severity assignment (MEDIUM/LOW) |
+| FR-4.1.8 | Epic 4 | Detection precedence (exact first) |
+| FR-4.1.9 | Epic 4 | Feature flag |
+| FR-4.2.1 | Epic 4 | PATTERN classification heuristic |
+| FR-4.2.2 | Epic 4 | "(v1 heuristic)" qualifier display |
+| FR-4.2.3 | Epic 4 | intentional=True for PATTERN |
+| FR-4.3.1 | Epic 4 | Inline hints keyed by (classification, severity) |
+| FR-4.3.2 | Epic 4 | COLLISION subtype hints |
+| FR-4.3.3 | Epic 4 | SEMANTIC hints (MEDIUM/LOW) |
+| FR-4.3.4 | Epic 4 | PATTERN hints (INFO) |
+| FR-4.3.5 | Epic 4 | Walk-through Problem-Evidence-Action template |
+| FR-4.3.6 | Epic 4 | Populate rendered dict at detection time |
+| FR-4.4.1 | Epic 4 | Orthogonal severity + classification dimensions |
+| FR-4.4.2 | Epic 4 | Overlap schema fields |
+| FR-4.4.3 | Epic 4 | Walk-through finding contract |
 
 ## Epic List
 
@@ -207,6 +229,20 @@ The following items MUST be included in story acceptance criteria:
 - Safety classification with 20-session minimum threshold
 - US-3.0 (empty states) can start immediately (Track B - Unblocked)
 - US-3.1+ REQUIRES Epic 2 completion
+
+---
+
+### Epic 4: Semantic Overlap Detection & Resolution
+**User Outcome:** Users can identify semantic overlaps between triggers (morphological variants, phrase reordering), distinguish intentional delegation patterns from real conflicts, and receive actionable resolution hints for each overlap.
+
+**FRs covered:** FR-4.1.1–FR-4.1.9, FR-4.2.1–FR-4.2.3, FR-4.3.1–FR-4.3.6, FR-4.4.1–FR-4.4.3
+
+**Implementation notes:**
+- Collector (Python) — enhance overlap detection in `compute_setup_profile()`
+- Add `nltk` dependency for Porter Stemmer (auto-installed via uv inline script deps, ADR-019 compatible)
+- Integrates with existing walk-through skill (Story 3.3) for detailed resolution guidance
+- Standalone: detection + hints work independently; walk-through integration optional
+- Pre-release validation required before merge
 
 ---
 
@@ -499,3 +535,241 @@ Users receive clear, prioritized recommendations with a summary dashboard, drill
 **When** cleanup mode is enabled
 **Then** show "INSUFFICIENT DATA" warning
 **And** do not suggest any deletions
+
+---
+
+## ADR-077 Requirements Extract (Semantic Overlap Detection, Classification, and Resolution)
+
+### Functional Requirements (ADR-077)
+
+**FR-4.1: Token-Set Detection with Stemming**
+- FR-4.1.1: Tokenize triggers into words (split on spaces, hyphens, underscores; strip punctuation)
+- FR-4.1.2: Stem each token using Porter Stemmer via `nltk.stem.porter` (auto-installed via uv inline script deps)
+- FR-4.1.3: Remove blocklisted common words (existing blocklist)
+- FR-4.1.4: Guard — skip comparison if either token set is empty after processing
+- FR-4.1.5: Compare stemmed token sets via Jaccard similarity: `|A ∩ B| / |A ∪ B|`
+- FR-4.1.6: Flag pairs with Jaccard ≥ 0.4 as `classification: SEMANTIC`
+- FR-4.1.7: Assign severity: Jaccard ≥ 0.8 → MEDIUM, Jaccard ≥ 0.4 and < 0.8 → LOW
+- FR-4.1.8: Exact-match detection runs first; skip semantic comparison for pairs already flagged as COLLISION
+- FR-4.1.9: Runtime feature flag `SEMANTIC_DETECTION_ENABLED` (default `True`)
+
+**FR-4.2: Intentional Overlap Classification (PATTERN)**
+- FR-4.2.1: If a skill and command share the same name AND the same source plugin → classify as PATTERN, severity INFO
+- FR-4.2.2: Display as architecture insight with "(v1 heuristic)" qualifier
+- FR-4.2.3: Set `intentional: True` for PATTERN overlaps
+
+**FR-4.3: Resolution Guidance**
+- FR-4.3.1: Generate inline hints keyed by `(classification, severity)`
+- FR-4.3.2: Hints for COLLISION subtypes: skill+skill, command+skill, command+command, agent+other
+- FR-4.3.3: Hints for SEMANTIC: MEDIUM ("add distinct trigger prefixes or consolidate") and LOW ("no action needed unless misfires")
+- FR-4.3.4: Hints for PATTERN: INFO ("Assumed delegation, no action needed")
+- FR-4.3.5: Walk-through integration with Problem-Evidence-Action template
+- FR-4.3.6: Populate `rendered` dict (problem, evidence, action) at detection time
+
+**FR-4.4: Data Model**
+- FR-4.4.1: Each overlap has orthogonal severity (HIGH/MEDIUM/LOW/INFO) and classification (COLLISION/SEMANTIC/PATTERN)
+- FR-4.4.2: Overlap schema: trigger, components, severity, classification, detection_method, similarity, intentional, hint
+- FR-4.4.3: Walk-through finding contract: finding_type "overlap_resolution", overlap dict, rendered dict
+
+### Non-Functional Requirements (ADR-077)
+
+| NFR | Requirement | Source |
+|-----|-------------|--------|
+| NFR-9 | ADR-019 compatibility — Porter Stemmer is deterministic suffix-stripping, not ML inference | ADR-077 §Decision |
+| NFR-10 | Performance — O(n²) acceptable for <200 triggers; benchmark full pipeline | ADR-077 §Performance |
+| NFR-11 | Migration — new fields have defaults for backward compatibility | ADR-077 §Migration |
+| NFR-12 | Pre-release validation — run detector against all installed plugin triggers before merging | ADR-077 §Validation Plan |
+
+### Additional Requirements (ADR-077)
+
+**From ADR-077 Implementation Notes:**
+- Add `tokenize_and_stem(trigger) → frozenset` utility function near existing trigger matching code
+- Apply during `compute_setup_profile()` trigger map construction
+- Store both original trigger and stemmed token set — display original in output
+- After detecting name collisions, check if both items share the same source plugin for PATTERN classification
+- Add `classification`, `intentional`, `hint`, and `similarity` fields to overlap dict
+- Walk-through skill (Story 3.3): add overlap finding template with Problem-Evidence-Action structure
+
+**Pre-Release Validation Plan:**
+1. Collect all triggers via `collect_usage.py --quick-stats`
+2. Run semantic detection on the full trigger set
+3. Manually review every flagged pair — confirm true positives, record false positives
+4. Adjust `SEMANTIC_THRESHOLD` if FP rate exceeds 20%
+5. Document validation results in PR description
+
+**Benchmark Requirements:**
+- Update benchmark script to include tokenization + stemming + classification + hint generation
+- Accept `--real-data` flag for actual installed plugin triggers
+- Report both synthetic and real-data results in PR
+
+**Migration Defaults for Existing Overlaps:**
+| New Field | Default | Rationale |
+|-----------|---------|-----------|
+| classification | "COLLISION" | Existing exact-match overlaps are collisions |
+| intentional | false | Never classified as intentional before |
+| hint | null | Generated at detection time; old data has none |
+| similarity | null | Only for stemmed matches |
+| detection_method | "exact" | Existing detection is exact string matching |
+
+**Consumer Audit Required:**
+- Walk-through skill (Story 3.3): handle overlaps with/without new fields
+- Summary dashboard (Story 3.2): degrade gracefully if classification absent
+- JSON output consumers: audit tolerance of unknown keys before merging
+
+---
+
+## Epic 4: Semantic Overlap Detection & Resolution
+
+Users can identify semantic overlaps between triggers (morphological variants, phrase reordering), distinguish intentional delegation patterns from real conflicts, and receive actionable resolution hints for each overlap.
+
+**Dependency:** Stories must be completed in order (4.1 → 4.2 → 4.3 → 4.4)
+
+### Story 4.1: Token-Set Semantic Detection
+
+**As a** Power Customizer,
+**I want** overlap detection to catch morphological variants and phrase reordering,
+**So that** "debug" vs "debugging" and "code review" vs "review code" are flagged as overlapping.
+
+**FRs:** FR-4.1.1, FR-4.1.2, FR-4.1.3, FR-4.1.4, FR-4.1.5, FR-4.1.6, FR-4.1.7, FR-4.1.8, FR-4.1.9, FR-4.4.1
+
+**Acceptance Criteria:**
+
+**Given** triggers exist in installed plugins
+**When** `compute_setup_profile()` builds the trigger map
+**Then** each trigger is tokenized (split on spaces, hyphens, underscores; strip punctuation)
+**And** each token is stemmed via Porter Stemmer (`nltk.stem.porter`, auto-installed via uv inline script deps)
+**And** blocklisted common words are removed
+**And** empty token sets after processing are skipped (no comparison)
+
+**Given** two triggers with stemmed token sets A and B
+**When** Jaccard similarity `|A ∩ B| / |A ∪ B|` is ≥ 0.4
+**Then** the pair is flagged with `classification: "SEMANTIC"`, `detection_method: "stemmed"`
+**And** severity is MEDIUM if Jaccard ≥ 0.8, LOW if Jaccard ≥ 0.4 and < 0.8
+**And** `similarity` field stores the Jaccard score as a float
+
+**Given** a pair already flagged as COLLISION by exact-match detection
+**When** semantic comparison runs
+**Then** that pair is skipped (detection precedence: exact first, no duplicates)
+
+**Given** the `SEMANTIC_DETECTION_ENABLED` constant is set to `False`
+**When** overlap detection runs
+**Then** only exact-match detection executes; no stemming or Jaccard comparisons occur
+
+**Given** existing overlaps produced before this feature
+**When** the updated code processes them
+**Then** defaults are applied: `classification: "COLLISION"`, `detection_method: "exact"`, `similarity: null`, `intentional: false`, `hint: null`
+
+**Given** a `tokenize_and_stem(trigger)` utility function
+**When** called with a trigger string
+**Then** it returns a `frozenset` of stemmed tokens
+**And** it is placed near existing trigger matching code in `collect_usage.py`
+**And** both original trigger and stemmed token set are stored (display original in output)
+
+---
+
+### Story 4.2: Intentional Overlap Classification (PATTERN)
+
+**As a** Power Customizer,
+**I want** intentional delegation patterns (command → same-name skill) recognized as harmless,
+**So that** known patterns don't clutter my overlap warnings.
+
+**FRs:** FR-4.2.1, FR-4.2.2, FR-4.2.3
+
+**Acceptance Criteria:**
+
+**Given** a skill and command share the same name AND the same source plugin
+**When** overlap classification runs (after name collision detection)
+**Then** the overlap is classified as `classification: "PATTERN"`, `severity: "INFO"`, `intentional: true`
+**And** the output message includes "(v1 heuristic)" qualifier text
+
+**Given** a skill and command share the same name but from DIFFERENT source plugins
+**When** overlap classification runs
+**Then** the overlap remains `classification: "COLLISION"`, `severity: "HIGH"`
+**And** no PATTERN classification is applied
+
+**Given** two skills (not a command+skill pair) share the same name from the same source
+**When** overlap classification runs
+**Then** the overlap remains COLLISION (PATTERN heuristic only applies to command+skill pairs in v1)
+
+**Given** PATTERN overlaps are displayed
+**When** the user views results
+**Then** the display reads as architecture insight, not a warning:
+> "Command `{name}` delegates to skill `{name}` ({source}) — assumed delegation pattern (v1 heuristic)"
+
+---
+
+### Story 4.3: Resolution Hints
+
+**As a** Power Customizer,
+**I want** each overlap to include an actionable one-line hint,
+**So that** I immediately know what to do about it without needing the walk-through.
+
+**FRs:** FR-4.3.1, FR-4.3.2, FR-4.3.3, FR-4.3.4, FR-4.4.2
+
+**Acceptance Criteria:**
+
+**Given** an overlap is detected and classified
+**When** hint generation runs
+**Then** a `hint` string is populated based on `(classification, severity)`:
+- COLLISION (skill+skill) HIGH: "`{a}` and `{b}` are both skills named `{name}` — rename the less specific one or merge into a single skill"
+- COLLISION (command+skill) HIGH: "`{a}` (command) and `{b}` (skill) share name `{name}` — if same-source, this is likely an intentional delegation pattern (will be auto-classified as PATTERN/INFO); if cross-source, rename the command or configure as intentional in v2's `intentional_overlaps`"
+- COLLISION (command+command) HIGH: "`{a}` and `{b}` are both commands named `{name}` — only one can be invoked; remove or rename the duplicate from the lower-priority plugin"
+- COLLISION (agent+other) HIGH: "Agent `{a}` collides with {type} `{b}` on name `{name}` — rename the non-agent component to avoid routing ambiguity"
+- SEMANTIC MEDIUM: "Triggers `{a}` and `{b}` overlap ({similarity:.0%}) — add distinct trigger prefixes, or consolidate into one component if they serve the same purpose"
+- SEMANTIC LOW: "Minor trigger similarity ({similarity:.0%}) between `{a}` and `{b}` — no action needed unless users report misfires"
+- PATTERN INFO: "Assumed delegation: `{command}` → `{skill}` ({source}) (v1 heuristic) — no action needed"
+
+**Given** a HIGH severity overlap
+**When** the user reads the hint
+**Then** the hint is actionable without needing the walk-through (self-contained resolution guidance)
+
+**Given** the hint uses template variables ({a}, {b}, {name}, {similarity}, etc.)
+**When** hints are generated
+**Then** actual component names, types, and scores are interpolated into the hint text
+
+---
+
+### Story 4.4: Walk-Through Integration & Pre-Release Validation
+
+**As a** Power Customizer,
+**I want** overlap findings to appear in the walk-through with Problem-Evidence-Action detail,
+**So that** I can explore resolutions interactively.
+
+**FRs:** FR-4.3.5, FR-4.3.6, FR-4.4.3
+
+**Acceptance Criteria:**
+
+**Given** an overlap finding exists
+**When** the detector produces output
+**Then** a `rendered` dict is populated at detection time with:
+- `problem`: the hint text
+- `evidence`: "Components {components} share trigger '{trigger}' (detection: {detection_method}, similarity: {similarity})"
+- `action`: context-specific recommendation based on classification
+
+**Given** the walk-through skill (Story 3.3) receives overlap findings
+**When** it processes them
+**Then** it accepts findings with `finding_type: "overlap_resolution"`
+**And** handles overlaps with and without new fields (migration tolerance using defaults from Story 4.1)
+
+**Given** the summary dashboard (Story 3.2) receives overlap data
+**When** it renders
+**Then** it displays severity without classification if classification field is absent (graceful degradation)
+
+**Given** all overlap data consumers (walk-through, dashboard, JSON output scripts)
+**When** audited before merge
+**Then** all tolerate unknown keys (additive schema change verified)
+**And** audit results are documented in the PR description
+
+**Given** the implementation is complete
+**When** pre-release validation runs per ADR-077 validation plan
+**Then** all triggers from installed plugins are collected via `collect_usage.py --quick-stats`
+**And** semantic detection runs against the full trigger set
+**And** every flagged pair is manually reviewed (true positives confirmed, false positives recorded)
+**And** `SEMANTIC_THRESHOLD` is adjusted if FP rate exceeds 20% of flagged pairs
+**And** validation results (trigger count, pairs checked, FP rate) are documented in PR description
+
+**Given** benchmark validation is required
+**When** the benchmark script runs
+**Then** it measures the full detection pipeline (tokenization + stemming + Jaccard + classification + hint generation)
+**And** accepts a `--real-data` flag for actual installed plugin triggers
+**And** reports both synthetic and real-data results in PR description

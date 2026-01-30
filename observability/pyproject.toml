@@ -12,4 +12,5 @@ dev = ["pytest"]
 dev-dependencies = [
     "pytest",
     "pytest-cov>=7.0.0",
+    "nltk",
 ]
