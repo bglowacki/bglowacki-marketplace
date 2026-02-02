@@ -304,3 +304,49 @@ class TestPatternClassification:
         collisions = [o for o in profile.overlapping_triggers if o.get("classification") == "COLLISION"]
         for c in collisions:
             assert c["intentional"] is False
+
+
+# --- Story 4.5: Delegation pattern detection tests ---
+
+class TestDelegationPatternDetection:
+    def test_same_source_name_in_trigger_classified_as_pattern(self):
+        """Same-source pair where one name appears in other's trigger → PATTERN/INFO."""
+        # Parent trigger references child by name ("mutation testing") and shares enough stems
+        # to cross the Jaccard threshold. Child's trigger also contains "mutation testing".
+        skills = [
+            _make_component("dev-workflow", ["run mutation testing"], source="plugin:dev"),
+            _make_component("mutation-testing", ["mutation testing"], source="plugin:dev"),
+        ]
+        profile = _setup_profile_with_overlaps(skills=skills)
+        patterns = [o for o in profile.overlapping_triggers if o.get("classification") == "PATTERN" and o.get("detection_method") == "stemmed"]
+        assert len(patterns) >= 1
+        assert patterns[0]["severity"] == "INFO"
+        assert patterns[0]["intentional"] is True
+        assert "name-in-trigger heuristic" in patterns[0]["hint"]
+
+    def test_cross_source_not_reclassified(self):
+        """Different sources → stays SEMANTIC even if name appears in trigger."""
+        skills = [
+            _make_component("dev-workflow", ["run mutation testing"], source="plugin:dev"),
+            _make_component("mutation-testing", ["mutation testing"], source="plugin:qa"),
+        ]
+        profile = _setup_profile_with_overlaps(skills=skills)
+        semantic = [o for o in profile.overlapping_triggers if o.get("classification") == "SEMANTIC"]
+        delegation_patterns = [o for o in profile.overlapping_triggers if o.get("classification") == "PATTERN" and o.get("detection_method") == "stemmed"]
+        assert len(delegation_patterns) == 0
+        # Should be SEMANTIC if similarity is above threshold
+        if semantic:
+            assert semantic[0]["intentional"] is False
+
+    def test_no_name_overlap_stays_semantic(self):
+        """Same source but no name-in-trigger match → stays SEMANTIC."""
+        skills = [
+            _make_component("skill-alpha", ["run code review checks"], source="plugin:dev"),
+            _make_component("skill-beta", ["execute code review analysis"], source="plugin:dev"),
+        ]
+        profile = _setup_profile_with_overlaps(skills=skills)
+        semantic = [o for o in profile.overlapping_triggers if o.get("classification") == "SEMANTIC"]
+        delegation_patterns = [o for o in profile.overlapping_triggers if o.get("classification") == "PATTERN" and o.get("detection_method") == "stemmed"]
+        assert len(delegation_patterns) == 0
+        if semantic:
+            assert semantic[0]["classification"] == "SEMANTIC"

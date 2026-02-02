@@ -793,6 +793,10 @@ def _generate_overlap_hint(overlap: dict) -> str:
     types = {t for t, _ in parsed}
 
     if classification == "PATTERN":
+        detection_method = overlap.get("detection_method", "")
+        if detection_method == "stemmed":
+            a, b = items[0], items[1]
+            return f"Delegation detected: `{a}` invokes `{b}` (name-in-trigger heuristic) — no action needed"
         cmd = next((n for t, n in parsed if t == "command"), parsed[0][1])
         skill_name = next((n for t, n in parsed if t == "skill"), parsed[1][1])
         source = overlap.get("source", "")
@@ -1007,6 +1011,20 @@ def compute_setup_profile(
         exact_pairs.add(frozenset({f"skill:{name}", f"command:{name}"}))
     overlapping = name_collision_entries + overlapping
 
+    # ADR-077: Detect delegation patterns (parent-child name-in-trigger)
+    delegation_pairs: set[frozenset[str]] = set()
+    for i in range(len(all_components)):
+        for j in range(i + 1, len(all_components)):
+            a, b = all_components[i], all_components[j]
+            if a.source_type != b.source_type or a.source_type == "":
+                continue
+            a_name = a.name.lower().replace("-", " ").replace("_", " ")
+            b_name = b.name.lower().replace("-", " ").replace("_", " ")
+            a_in_b_triggers = any(a_name in t.lower() for t in b.triggers)
+            b_in_a_triggers = any(b_name in t.lower() for t in a.triggers)
+            if a_in_b_triggers or b_in_a_triggers:
+                delegation_pairs.add(frozenset({f"{a.type}:{a.name}", f"{b.type}:{b.name}"}))
+
     # ADR-077: Semantic overlap detection via stemmed token-set Jaccard similarity
     if SEMANTIC_DETECTION_ENABLED:
         # Build stemmed token sets for all components
@@ -1032,17 +1050,29 @@ def compute_setup_profile(
                     continue
                 score = _jaccard_similarity(stems_a, stems_b)
                 if score >= SEMANTIC_THRESHOLD:
-                    severity = "MEDIUM" if score >= 0.8 else "LOW"
-                    sem_entry = {
-                        "trigger": f"{trig_a} ↔ {trig_b}",
-                        "items": [comp_a, comp_b],
-                        "severity": severity,
-                        "classification": "SEMANTIC",
-                        "detection_method": "stemmed",
-                        "similarity": round(score, 4),
-                        "intentional": False,
-                        "hint": None,
-                    }
+                    if pair_key in delegation_pairs:
+                        sem_entry = {
+                            "trigger": f"{trig_a} ↔ {trig_b}",
+                            "items": [comp_a, comp_b],
+                            "severity": "INFO",
+                            "classification": "PATTERN",
+                            "detection_method": "stemmed",
+                            "similarity": round(score, 4),
+                            "intentional": True,
+                            "hint": None,
+                        }
+                    else:
+                        severity = "MEDIUM" if score >= 0.8 else "LOW"
+                        sem_entry = {
+                            "trigger": f"{trig_a} ↔ {trig_b}",
+                            "items": [comp_a, comp_b],
+                            "severity": severity,
+                            "classification": "SEMANTIC",
+                            "detection_method": "stemmed",
+                            "similarity": round(score, 4),
+                            "intentional": False,
+                            "hint": None,
+                        }
                     sem_entry["hint"] = _generate_overlap_hint(sem_entry)
                     sem_entry["rendered"] = _generate_rendered_dict(sem_entry)
                     overlapping.append(sem_entry)
