@@ -2,6 +2,17 @@
 
 Schema versions for the JSON output from `collect_usage.py`.
 
+## v3.2 (2026-01-30)
+
+### Added
+- `rendered` dict on each overlap entry in `setup_profile.overlapping_triggers` with `problem`, `evidence`, `action` fields
+- `overlap_findings` array in `pre_computed_findings` with `finding_type: "overlap_resolution"` entries
+- Walk-through agent template for overlap resolution findings
+
+### Migration Notes (v3.1 → v3.2)
+- Non-breaking: new fields are additive
+- Consumers should handle missing `rendered` gracefully (use `hint` as fallback for `problem`)
+
 ## v3.1 (2026-01-27)
 
 ### Added

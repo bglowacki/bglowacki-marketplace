@@ -66,5 +66,5 @@ development_status:
   4-1-token-set-semantic-detection: done
   4-2-intentional-overlap-classification-pattern: done
   4-3-resolution-hints: done
-  4-4-walk-through-integration-and-pre-release-validation: ready-for-dev
+  4-4-walk-through-integration-and-pre-release-validation: done
   epic-4-retrospective: optional

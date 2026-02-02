@@ -373,6 +373,19 @@ def compute_pre_computed_findings(
                         "rollback_guidance": _rollback_guidance(item["source"]),
                     })
 
+    # Story 4.4 AC-2: Pre-compute overlap findings for walk-through
+    overlap_findings = []
+    for overlap in setup_profile.overlapping_triggers:
+        overlap_findings.append({
+            "finding_type": "overlap_resolution",
+            "overlap": overlap,
+            "rendered": overlap.get("rendered", {
+                "problem": overlap.get("hint", ""),
+                "evidence": "",
+                "action": "",
+            }),
+        })
+
     result = {
         "_note": "Deterministic findings - 100% certain, no LLM inference needed",
         "empty_descriptions": empty_descriptions[:20],  # Limit
@@ -383,6 +396,7 @@ def compute_pre_computed_findings(
         # Reference existing pre-computed data
         "overlapping_triggers_count": len(setup_profile.overlapping_triggers),
         "description_quality_issues": sum(1 for d in setup_profile.description_quality if d.get("needs_improvement")),
+        "overlap_findings": overlap_findings,  # Story 4.4: Walk-through overlap findings
         "counts": {
             "empty_descriptions": len(empty_descriptions),
             "never_used": len(never_used),
@@ -817,6 +831,33 @@ def _generate_overlap_hint(overlap: dict) -> str:
     return ""
 
 
+def _generate_rendered_dict(overlap: dict) -> dict:
+    """Story 4.4 AC-1: Generate rendered dict with problem/evidence/action at detection time."""
+    components = ", ".join(overlap.get("items", []))
+    trigger = overlap.get("trigger", "")
+    detection_method = overlap.get("detection_method", "unknown")
+    similarity = overlap.get("similarity")
+    classification = overlap.get("classification", "")
+    hint = overlap.get("hint", "")
+
+    problem = hint or ""
+    evidence = (
+        f"Components {components} share trigger '{trigger}' "
+        f"(detection: {detection_method}, similarity: {similarity})"
+    )
+
+    if classification == "PATTERN":
+        action = "No action needed — this is an intentional delegation pattern."
+    elif classification == "COLLISION":
+        action = "Rename or consolidate the conflicting components to avoid routing ambiguity."
+    elif classification == "SEMANTIC":
+        action = "Add distinct trigger prefixes or consolidate if they serve the same purpose."
+    else:
+        action = "Review the overlap and decide whether to rename, consolidate, or ignore."
+
+    return {"problem": problem, "evidence": evidence, "action": action}
+
+
 def compute_setup_profile(
     skills: list[SkillOrAgent],
     agents: list[SkillOrAgent],
@@ -929,6 +970,7 @@ def compute_setup_profile(
                 "hint": None,
             }
             overlap_entry["hint"] = _generate_overlap_hint(overlap_entry)
+            overlap_entry["rendered"] = _generate_rendered_dict(overlap_entry)
             overlapping.append(overlap_entry)
             # Track all component pairs from this exact match (AC-3)
             for i in range(len(item_labels)):
@@ -958,6 +1000,7 @@ def compute_setup_profile(
             "source": skill_src if is_same_source else "",
         }
         entry["hint"] = _generate_overlap_hint(entry)
+        entry["rendered"] = _generate_rendered_dict(entry)
         name_collision_entries.append(entry)
         if not is_same_source:
             high_severity_count += 1
@@ -1001,6 +1044,7 @@ def compute_setup_profile(
                         "hint": None,
                     }
                     sem_entry["hint"] = _generate_overlap_hint(sem_entry)
+                    sem_entry["rendered"] = _generate_rendered_dict(sem_entry)
                     overlapping.append(sem_entry)
                     # Avoid duplicate semantic pairs
                     exact_pairs.add(pair_key)
@@ -2344,7 +2388,7 @@ def generate_analysis_json(
     return {
         "_schema": {
             "description": "Claude Code usage analysis data for agent interpretation",
-            "version": "3.13",  # Story 3.4: Safe cleanup mode
+            "version": "3.14",  # Story 4.4: Walk-through integration + rendered dicts
             "cleanup_mode": cleanup_mode,  # Story 3.4: Whether cleanup suggestions are enabled
             "collection_timestamp": datetime.now().isoformat(),  # Story 1.2 AC-5
             "sections": {

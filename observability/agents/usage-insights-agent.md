@@ -647,6 +647,31 @@ triggers:
 **Why:** Overlapping triggers cause unpredictable behavior. Claude may pick the wrong component.
 ```
 
+#### Overlap Resolution Finding
+
+For findings with `finding_type: "overlap_resolution"`, use the pre-computed `rendered` dict directly:
+
+```markdown
+### Finding {X} of {Y}: Overlap Resolution
+
+**Problem:** {rendered.problem}
+
+**Evidence:** {rendered.evidence}
+
+**Recommended Action:** {rendered.action}
+
+**Classification:** {overlap.classification} | **Severity:** {overlap.severity} | **Intentional:** {overlap.intentional}
+```
+
+If the `rendered` dict is missing (legacy data), fall back to defaults:
+- `problem`: Use `overlap.hint` or "Trigger overlap detected"
+- `evidence`: Format from `overlap.items`, `overlap.trigger`, `overlap.detection_method`
+- `action`: Use classification-based default: COLLISION → "Rename or consolidate", SEMANTIC → "Add distinct prefixes", PATTERN → "No action needed"
+
+If `classification` field is absent, display severity only (graceful degradation).
+
+**Options:** [Accept] [Skip] [More Detail]
+
 ## Analysis Workflow
 
 ### Pre-Phase: Empty State Checks (ALWAYS DO FIRST)

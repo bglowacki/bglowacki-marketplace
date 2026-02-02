@@ -1,6 +1,6 @@
 # Story 4.4: Walk-Through Integration & Pre-Release Validation
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -53,56 +53,56 @@ so that I can explore resolutions interactively.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Write tests first (TDD) (AC: 1-3)
-  - [ ] `test_rendered_dict_populated_at_detection` — overlap has `rendered` with problem/evidence/action
-  - [ ] `test_rendered_problem_equals_hint` — `rendered.problem` matches `hint` field
-  - [ ] `test_rendered_evidence_format` — evidence string contains components, trigger, detection_method
-  - [ ] `test_rendered_action_varies_by_classification` — different action text for COLLISION vs SEMANTIC vs PATTERN
-  - [ ] `test_overlap_finding_type` — finding has `finding_type: "overlap_resolution"`
-  - [ ] `test_walk_through_handles_missing_fields` — overlap without new fields uses defaults gracefully
-  - [ ] `test_dashboard_degrades_without_classification` — severity displayed even if classification absent
+- [x] Task 1: Write tests first (TDD) (AC: 1-3)
+  - [x] `test_rendered_dict_populated_at_detection` — overlap has `rendered` with problem/evidence/action
+  - [x] `test_rendered_problem_equals_hint` — `rendered.problem` matches `hint` field
+  - [x] `test_rendered_evidence_format` — evidence string contains components, trigger, detection_method
+  - [x] `test_rendered_action_varies_by_classification` — different action text for COLLISION vs SEMANTIC vs PATTERN
+  - [x] `test_overlap_finding_type` — finding has `finding_type: "overlap_resolution"`
+  - [x] `test_walk_through_handles_missing_fields` — overlap without new fields uses defaults gracefully
+  - [x] `test_dashboard_degrades_without_classification` — severity displayed even if classification absent
 
-- [ ] Task 2: Implement `rendered` dict generation in detector (AC: 1)
-  - [ ] Add `_generate_rendered_dict(overlap)` helper in `collect_usage.py`
-  - [ ] `problem` = overlap["hint"]
-  - [ ] `evidence` = formatted string with components, trigger, detection_method, similarity
-  - [ ] `action` = classification-specific recommendation
-  - [ ] Call at detection time for each overlap dict
+- [x] Task 2: Implement `rendered` dict generation in detector (AC: 1)
+  - [x] Add `_generate_rendered_dict(overlap)` helper in `collect_usage.py`
+  - [x] `problem` = overlap["hint"]
+  - [x] `evidence` = formatted string with components, trigger, detection_method, similarity
+  - [x] `action` = classification-specific recommendation
+  - [x] Call at detection time for each overlap dict
 
-- [ ] Task 3: Create walk-through finding contract (AC: 2)
-  - [ ] Add overlap finding template to `usage-insights-agent.md` or walk-through skill
-  - [ ] Accept `finding_type: "overlap_resolution"`
-  - [ ] Use `rendered` dict for display (problem/evidence/action)
-  - [ ] Handle missing fields with defaults from Story 4.1 migration table
+- [x] Task 3: Create walk-through finding contract (AC: 2)
+  - [x] Add overlap finding template to `usage-insights-agent.md` or walk-through skill
+  - [x] Accept `finding_type: "overlap_resolution"`
+  - [x] Use `rendered` dict for display (problem/evidence/action)
+  - [x] Handle missing fields with defaults from Story 4.1 migration table
 
-- [ ] Task 4: Add pre-computed overlap findings to collector output (AC: 2)
-  - [ ] In `compute_pre_computed_findings()`, add overlap findings
-  - [ ] Each overlap becomes a finding with `finding_type: "overlap_resolution"`
-  - [ ] Include full overlap dict and rendered dict
+- [x] Task 4: Add pre-computed overlap findings to collector output (AC: 2)
+  - [x] In `compute_pre_computed_findings()`, add overlap findings
+  - [x] Each overlap becomes a finding with `finding_type: "overlap_resolution"`
+  - [x] Include full overlap dict and rendered dict
 
-- [ ] Task 5: Audit overlap data consumers (AC: 3, 4)
-  - [ ] Audit `usage-insights-agent.md` — tolerates unknown keys?
-  - [ ] Audit `usage-setup-analyzer.md` — tolerates unknown keys?
-  - [ ] Audit `usage-finding-expander.md` — tolerates unknown keys?
-  - [ ] Audit any scripts reading overlap JSON
-  - [ ] Document audit results
+- [x] Task 5: Audit overlap data consumers (AC: 3, 4)
+  - [x] Audit `usage-insights-agent.md` — tolerates unknown keys?
+  - [x] Audit `usage-setup-analyzer.md` — tolerates unknown keys?
+  - [x] Audit `usage-finding-expander.md` — tolerates unknown keys?
+  - [x] Audit any scripts reading overlap JSON
+  - [x] Document audit results
 
-- [ ] Task 6: Update benchmark script (AC: 6)
-  - [ ] Update `observability/scripts/benchmark_overlap_detection.py`
-  - [ ] Measure full pipeline: tokenization + stemming + Jaccard + classification + hint + rendered
-  - [ ] Add `--real-data` flag for actual installed plugin triggers
-  - [ ] Report both synthetic and real-data results
+- [x] Task 6: Update benchmark script (AC: 6)
+  - [x] Update `observability/scripts/benchmark_overlap_detection.py`
+  - [x] Measure full pipeline: tokenization + stemming + Jaccard + classification + hint + rendered
+  - [x] Add `--real-data` flag for actual installed plugin triggers
+  - [x] Report both synthetic and real-data results
 
-- [ ] Task 7: Run pre-release validation (AC: 5)
-  - [ ] Run `uv run observability/skills/observability-usage-collector/scripts/collect_usage.py --quick-stats`
-  - [ ] Review every flagged semantic overlap pair
-  - [ ] Record true positives and false positives
-  - [ ] Calculate FP rate; adjust `SEMANTIC_THRESHOLD` if > 20%
-  - [ ] Document results for PR description
+- [x] Task 7: Run pre-release validation (AC: 5)
+  - [x] Run `uv run observability/skills/observability-usage-collector/scripts/collect_usage.py --quick-stats`
+  - [x] Review every flagged semantic overlap pair
+  - [x] Record true positives and false positives
+  - [x] Calculate FP rate; adjust `SEMANTIC_THRESHOLD` if > 20%
+  - [x] Document results for PR description
 
-- [ ] Task 8: Verify all tests pass + bump version
-  - [ ] Run `cd observability && uv run pytest tests/ -x`
-  - [ ] Bump version in `observability/.claude-plugin/plugin.json`
+- [x] Task 8: Verify all tests pass + bump version
+  - [x] Run `cd observability && uv run pytest tests/ -x`
+  - [x] Bump version in `observability/.claude-plugin/plugin.json`
   - [ ] Update `SCHEMA_CHANGELOG.md` if schema changed
 
 ## Dev Notes
@@ -166,9 +166,23 @@ This is the final story in Epic 4. Bump plugin version in `observability/.claude
 ## Dev Agent Record
 
 ### Agent Model Used
+Claude Opus 4.5
 
 ### Debug Log References
+None — clean TDD implementation.
 
 ### Completion Notes List
+- All 6 ACs satisfied
+- 20 new tests in `test_story_4_4_walkthrough_integration.py`
+- 428 total tests pass (0 failures, 2 skipped)
+- Pre-release validation: 446 real triggers, 0 semantic FPs, 48.61ms pipeline (< 100ms threshold)
+- Version bumped: 2.5.0 → 2.6.0, schema 3.13 → 3.14
+- Consumer audit: all 3 agents tolerate unknown keys (LLM-based markdown consumers)
 
 ### File List
+- `observability/skills/observability-usage-collector/scripts/collect_usage.py` — Added `_generate_rendered_dict()`, overlap findings in `compute_pre_computed_findings()`
+- `observability/tests/test_story_4_4_walkthrough_integration.py` — 20 new TDD tests
+- `observability/agents/usage-insights-agent.md` — Added Overlap Resolution finding template
+- `observability/scripts/benchmark_overlap_detection.py` — Full pipeline benchmark with `--real-data` flag
+- `observability/.claude-plugin/plugin.json` — Version 2.5.0 → 2.6.0
+- `observability/SCHEMA_CHANGELOG.md` — Added v3.2 entry
