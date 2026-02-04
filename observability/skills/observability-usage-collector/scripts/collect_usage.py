@@ -298,16 +298,16 @@ def compute_pre_computed_findings(
     These findings are 100% certain (no inference needed) and should be
     trusted directly without LLM re-verification.
     """
-    # Empty descriptions (< 30 chars)
+    # Empty descriptions - only flag truly missing descriptions (length 0)
+    # Short descriptions are fine; hooks don't need descriptions for discoverability
     empty_descriptions = []
     for item_list, item_type in [(skills, "skill"), (agents, "agent"), (commands, "command")]:
         for item in item_list:
-            if len(item.description) < 30:
+            if len(item.description) == 0:
                 empty_descriptions.append({
                     "name": item.name,
                     "type": item_type,
                     "source": item.source_type,
-                    "description_length": len(item.description),
                 })
 
     # Never-used components (from skills/agents that have 0 usage)

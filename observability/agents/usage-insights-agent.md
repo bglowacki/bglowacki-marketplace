@@ -168,7 +168,7 @@ Consider these findings preliminary until more data is collected.
 ### Pre-Computed Findings (ADR-054)
 
 The `pre_computed_findings` section contains **100% certain** findings computed in Python:
-- `empty_descriptions`: Components with descriptions < 30 chars
+- `empty_descriptions`: Skills/agents/commands with no description (hooks excluded — they don't need descriptions)
 - `never_used`: Components never used in analyzed sessions
 - `name_collisions`: Skills and commands with same name
 - `exact_trigger_matches`: Prompts containing exact component names that weren't used
