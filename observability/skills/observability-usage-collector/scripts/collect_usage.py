@@ -2085,6 +2085,25 @@ def calculate_impact_score(confidence: float, frequency: float, recency: float) 
     return (confidence * 0.4) + (frequency * 0.4) + (recency * 0.2)
 
 
+def _was_component_invoked(item: SkillOrAgent, session: SessionData) -> bool:
+    """Check if a component was invoked in a session.
+
+    The Skill tool records the command name (e.g. "collect-usage") not the
+    skill name (e.g. "observability-usage-collector"), and may use plugin-qualified
+    names (e.g. "observability:collect-usage"). Check all variations.
+    """
+    used_field = "skills_used" if item.type != "agent" else "agents_used"
+    used_names: set[str] = getattr(session, used_field)
+    used_lower = {s.lower().lstrip("/") for s in used_names}
+    used_suffixes = {s.split(":")[-1] for s in used_lower}
+
+    if item.name.lower() in used_lower:
+        return True
+
+    triggers_lower = {t.lower().lstrip("/") for t in item.triggers}
+    return bool(triggers_lower & used_lower) or bool(triggers_lower & used_suffixes)
+
+
 def detect_missed_opportunities(
     sessions: list[SessionData],
     skills: list[SkillOrAgent],
@@ -2114,7 +2133,7 @@ def detect_missed_opportunities(
                             best_confidence = m.confidence
                             matched_prompt = prompt
 
-            was_invoked = skill.name in session.skills_used or skill.name in session.agents_used
+            was_invoked = _was_component_invoked(skill, session)
 
             if session_matched and not was_invoked and best_confidence > CONFIDENCE_HIGH:
                 if skill.name not in grouped:
@@ -2165,7 +2184,7 @@ def detect_missed_opportunities(
     return result
 
 
-def _classify_component(item: SkillOrAgent, sessions: list[SessionData], used_field: str) -> str:
+def _classify_component(item: SkillOrAgent, sessions: list[SessionData], used_field: str = "") -> str:
     """Story 1.2 AC-1: Classify a skill or agent based on usage in sessions.
 
     Returns:
@@ -2176,8 +2195,7 @@ def _classify_component(item: SkillOrAgent, sessions: list[SessionData], used_fi
     if not sessions:
         return SkillClassification.UNUSED
 
-    was_invoked = any(item.name in getattr(s, used_field) for s in sessions)
-    if was_invoked:
+    if any(_was_component_invoked(item, s) for s in sessions):
         return SkillClassification.ACTIVE
 
     for session in sessions:
@@ -2197,13 +2215,13 @@ def classify_agent(agent: SkillOrAgent, sessions: list[SessionData]) -> str:
     return _classify_component(agent, sessions, "agents_used")
 
 
-def _get_component_usage_stats(item: SkillOrAgent, sessions: list[SessionData], used_field: str) -> tuple[int, list[str], str | None, str | None]:
+def _get_component_usage_stats(item: SkillOrAgent, sessions: list[SessionData], used_field: str = "") -> tuple[int, list[str], str | None, str | None]:
     """Story 1.2 AC-2 & AC-4: Get usage count, sessions_used, and timestamps for a component.
 
     Returns:
         Tuple of (usage_count, list of session IDs, first_used ISO string or None, last_used ISO string or None)
     """
-    used_sessions = [s for s in sessions if item.name in getattr(s, used_field)]
+    used_sessions = [s for s in sessions if _was_component_invoked(item, s)]
     sessions_used = [s.session_id for s in used_sessions]
 
     if not used_sessions:
@@ -2304,13 +2322,8 @@ def analyze_jsonl(
 
             for match in matches:
                 item, triggers = match.skill, match.matched_triggers
-                was_used = False
-                if item.type == "skill" and item.name in session.skills_used:
-                    was_used = True
-                elif item.type == "agent" and item.name in session.agents_used:
-                    was_used = True
-                elif item.type == "command":
-                    # Commands are slash commands - check if /command was in the prompt
+                was_used = _was_component_invoked(item, session)
+                if not was_used and item.type == "command":
                     was_used = f"/{item.name}" in prompt.lower()
 
                 if not was_used:
