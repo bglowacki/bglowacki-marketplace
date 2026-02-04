@@ -981,8 +981,9 @@ def compute_setup_profile(
                 for j in range(i + 1, len(item_labels)):
                     exact_pairs.add(frozenset({item_labels[i], item_labels[j]}))
 
-    # Add name collision warnings (highest severity) with PATTERN classification (ADR-077 Part 2)
-    # Build source lookup for skills and commands
+    # Add name collision entries with PATTERN classification (ADR-077 Part 2)
+    # A command + skill sharing a name is always an intentional delegation pattern
+    # (the command is a /shortcut to invoke the skill), regardless of source
     _skill_source = {s.name.lower(): s.source_type for s in skills}
     _command_source = {c.name.lower(): c.source_type for c in commands}
 
@@ -990,24 +991,21 @@ def compute_setup_profile(
     for name in name_collisions:
         skill_src = _skill_source.get(name, "")
         cmd_src = _command_source.get(name, "")
-        is_same_source = skill_src == cmd_src and skill_src != ""
 
         entry = {
             "trigger": f"[name collision: {name}]",
             "items": [f"skill:{name}", f"command:{name}"],
-            "severity": "INFO" if is_same_source else "HIGH",
-            "classification": "PATTERN" if is_same_source else "COLLISION",
+            "severity": "INFO",
+            "classification": "PATTERN",
             "detection_method": "exact",
             "similarity": None,
-            "intentional": is_same_source,
+            "intentional": True,
             "hint": None,
-            "source": skill_src if is_same_source else "",
+            "source": skill_src or cmd_src,
         }
         entry["hint"] = _generate_overlap_hint(entry)
         entry["rendered"] = _generate_rendered_dict(entry)
         name_collision_entries.append(entry)
-        if not is_same_source:
-            high_severity_count += 1
         exact_pairs.add(frozenset({f"skill:{name}", f"command:{name}"}))
     overlapping = name_collision_entries + overlapping
 

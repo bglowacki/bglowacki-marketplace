@@ -255,16 +255,20 @@ class TestPatternClassification:
         assert patterns[0]["severity"] == "INFO"
         assert patterns[0]["intentional"] is True
 
-    def test_pattern_keeps_collision_cross_source(self):
-        """AC-2: Same name + different source → stays COLLISION/HIGH."""
+    def test_pattern_cross_source_still_intentional(self):
+        """AC-2: Command + skill same name, different source → still PATTERN/INFO.
+
+        A command wrapping a skill is always intentional regardless of source.
+        """
         skills = [_make_component("deploy", ["deploy app"], type_="skill", source="plugin:ops")]
         commands = [_make_component("deploy", ["deploy cmd"], type_="command", source="plugin:infra")]
         profile = _setup_profile_with_overlaps(skills=skills, commands=commands)
         collisions = [o for o in profile.overlapping_triggers
                       if o.get("trigger") == "[name collision: deploy]"]
         assert len(collisions) == 1
-        assert collisions[0]["classification"] == "COLLISION"
-        assert collisions[0]["severity"] == "HIGH"
+        assert collisions[0]["classification"] == "PATTERN"
+        assert collisions[0]["severity"] == "INFO"
+        assert collisions[0]["intentional"] is True
 
     def test_pattern_only_command_skill_pairs(self):
         """AC-3: Two skills same name same source → stays COLLISION."""
