@@ -2,6 +2,14 @@
 
 All notable changes to the observability plugin.
 
+## [2.8.0] - 2026-02-04
+
+### Added
+- Outdated plugin detection: compares installed versions against remote marketplace via GitHub API
+- Stale cache detection: temp_git leftovers, old version accumulation, orphaned marketplaces
+- New pre-computed finding types: `outdated_plugins` and `stale_cache`
+- 19 new tests in `test_outdated_checks.py`
+
 ## [2.3.0] - 2026-01-27
 
 ### Added

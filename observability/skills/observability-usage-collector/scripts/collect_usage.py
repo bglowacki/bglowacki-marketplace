@@ -17,12 +17,14 @@ This script performs DATA COLLECTION only - no analysis or recommendations.
 """
 
 import argparse
+import base64
 import json
 import os
 import re
 import string
 import sys
 import hashlib
+import urllib.request
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -282,6 +284,184 @@ def _rollback_guidance(source_type: str) -> str:
 
 CLEANUP_MIN_SESSIONS = 20
 
+SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
+GITHUB_API_TIMEOUT = 5
+
+
+def _is_semver(version: str) -> bool:
+    return bool(SEMVER_RE.match(version))
+
+
+def _parse_semver(version: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in version.split("."))
+
+
+def check_stale_cache(plugins_cache: Path, settings_path: Path) -> list[dict]:
+    """Detect stale cache artifacts: temp dirs, old versions, orphaned marketplaces."""
+    findings = []
+
+    if not plugins_cache.exists():
+        return findings
+
+    known_marketplaces = set()
+    # Built-in marketplaces (always known)
+    builtin = {"claude-plugins-official"}
+
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text())
+            known_marketplaces = set(settings.get("extraKnownMarketplaces", {}).keys())
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    for entry in sorted(plugins_cache.iterdir()):
+        if not entry.is_dir() or entry.name.startswith("."):
+            continue
+
+        # Temp directory leftovers
+        if entry.name.startswith("temp_git_"):
+            findings.append({"type": "temp_leftover", "path": entry.name})
+            continue
+
+        # Check for orphaned marketplaces (only if settings file exists)
+        if settings_path.exists() and entry.name not in known_marketplaces and entry.name not in builtin:
+            findings.append({"type": "orphaned_marketplace", "name": entry.name})
+
+        # Check plugins within this marketplace for old versions
+        for plugin_dir in sorted(entry.iterdir()):
+            if not plugin_dir.is_dir() or plugin_dir.name.startswith("."):
+                continue
+
+            version_dirs = [
+                d for d in plugin_dir.iterdir()
+                if d.is_dir() and not d.name.startswith(".") and _is_semver(d.name)
+            ]
+
+            if len(version_dirs) <= 2:
+                continue
+
+            versions = sorted(version_dirs, key=lambda d: _parse_semver(d.name))
+            active = versions[-1].name
+            old = [v.name for v in versions[:-1]]
+
+            findings.append({
+                "type": "old_versions",
+                "plugin": plugin_dir.name,
+                "marketplace": entry.name,
+                "active_version": active,
+                "old_versions": old,
+                "old_count": len(old),
+            })
+
+    return findings
+
+
+def check_outdated_plugins(plugins_cache: Path, settings_path: Path) -> list[dict]:
+    """Compare installed plugin versions against remote marketplace versions."""
+    findings = []
+
+    if not settings_path.exists():
+        return findings
+
+    try:
+        settings = json.loads(settings_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return findings
+
+    known = settings.get("extraKnownMarketplaces", {})
+
+    for mp_name, mp_info in known.items():
+        source = mp_info.get("source", {})
+        repo = source.get("repo")
+        if not repo:
+            continue
+
+        mp_cache = plugins_cache / mp_name
+        if not mp_cache.exists():
+            continue
+
+        # Read local marketplace.json to get plugin list
+        mp_json = mp_cache / ".claude-plugin" / "marketplace.json"
+        if not mp_json.exists():
+            continue
+
+        try:
+            mp_data = json.loads(mp_json.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        for plugin_entry in mp_data.get("plugins", []):
+            plugin_name = plugin_entry.get("name", "")
+            plugin_source = plugin_entry.get("source", f"./{plugin_name}")
+            if not plugin_name:
+                continue
+
+            # Find installed version
+            plugin_dir = mp_cache / plugin_name
+            if not plugin_dir.exists():
+                continue
+
+            version_dirs = [
+                d for d in plugin_dir.iterdir()
+                if d.is_dir() and not d.name.startswith(".")
+            ]
+            if not version_dirs:
+                continue
+
+            # Find latest installed - prefer semver sorting, fall back to mtime
+            semver_dirs = [d for d in version_dirs if _is_semver(d.name)]
+            if semver_dirs:
+                latest_local = max(semver_dirs, key=lambda d: _parse_semver(d.name))
+            else:
+                continue  # Can't compare non-semver versions
+
+            # Read local version from plugin.json
+            local_pjson = latest_local / ".claude-plugin" / "plugin.json"
+            if not local_pjson.exists():
+                local_pjson = latest_local / "plugin.json"
+            if not local_pjson.exists():
+                continue
+
+            try:
+                local_data = json.loads(local_pjson.read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+
+            installed_version = local_data.get("version")
+            if not installed_version or not _is_semver(installed_version):
+                continue
+
+            # Fetch remote version from GitHub API
+            # Normalize source path: "./observability" -> "observability"
+            source_path = plugin_source.lstrip("./")
+            api_url = f"https://api.github.com/repos/{repo}/contents/{source_path}/.claude-plugin/plugin.json"
+
+            try:
+                req = urllib.request.Request(api_url)
+                req.add_header("Accept", "application/vnd.github.v3+json")
+                with urllib.request.urlopen(req, timeout=GITHUB_API_TIMEOUT) as resp:
+                    api_data = json.loads(resp.read())
+
+                content = base64.b64decode(api_data["content"]).decode()
+                remote_data = json.loads(content)
+                remote_version = remote_data.get("version")
+
+                if not remote_version or not _is_semver(remote_version):
+                    continue
+
+                if _parse_semver(remote_version) > _parse_semver(installed_version):
+                    findings.append({
+                        "plugin": plugin_name,
+                        "marketplace": mp_name,
+                        "installed_version": installed_version,
+                        "latest_version": remote_version,
+                        "source_repo": repo,
+                    })
+            except Exception:
+                continue
+
+    return findings
+
 
 def compute_pre_computed_findings(
     skills: list,
@@ -292,6 +472,8 @@ def compute_pre_computed_findings(
     setup_profile,
     cleanup_mode: bool = False,
     jsonl_stats: dict | None = None,
+    plugins_cache: Path | None = None,
+    settings_path: Path | None = None,
 ) -> dict:
     """ADR-054: Pre-compute deterministic findings that don't need LLM.
 
@@ -386,6 +568,13 @@ def compute_pre_computed_findings(
             }),
         })
 
+    # Plugin freshness checks
+    outdated_plugins = []
+    stale_cache = []
+    if plugins_cache and settings_path:
+        stale_cache = check_stale_cache(plugins_cache, settings_path)
+        outdated_plugins = check_outdated_plugins(plugins_cache, settings_path)
+
     result = {
         "_note": "Deterministic findings - 100% certain, no LLM inference needed",
         "empty_descriptions": empty_descriptions[:20],  # Limit
@@ -397,12 +586,16 @@ def compute_pre_computed_findings(
         "overlapping_triggers_count": len(setup_profile.overlapping_triggers),
         "description_quality_issues": sum(1 for d in setup_profile.description_quality if d.get("needs_improvement")),
         "overlap_findings": overlap_findings,  # Story 4.4: Walk-through overlap findings
+        "outdated_plugins": outdated_plugins[:20],
+        "stale_cache": stale_cache[:20],
         "counts": {
             "empty_descriptions": len(empty_descriptions),
             "never_used": len(never_used),
             "name_collisions": len(name_collisions),
             "exact_matches": len(exact_matches),
             "invalid_yaml_files": len(_yaml_parse_issues),
+            "outdated_plugins": len(outdated_plugins),
+            "stale_cache": len(stale_cache),
         },
     }
 
@@ -2392,7 +2585,12 @@ def generate_analysis_json(
     quality_metrics = compute_quality_metrics(sessions, missed, feedback)
 
     # ADR-054: Pre-compute deterministic findings
-    pre_computed = compute_pre_computed_findings(skills, agents, commands, sessions, missed, setup_profile, cleanup_mode, jsonl_stats)
+    settings_path = CLAUDE_DIR / "settings.json"
+    pre_computed = compute_pre_computed_findings(
+        skills, agents, commands, sessions, missed, setup_profile,
+        cleanup_mode, jsonl_stats,
+        plugins_cache=PLUGINS_CACHE, settings_path=settings_path,
+    )
 
     # Story 2.3: Detect missed opportunities grouped by skill with impact scores
     missed_opportunities = detect_missed_opportunities(sessions, skills + agents)
